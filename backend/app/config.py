@@ -88,14 +88,19 @@ class ProductionConfig(Config):
     # Override and validate CORS_ORIGINS for production
     _prod_cors_origins_env = os.environ.get('CORS_ORIGINS')
     if not _prod_cors_origins_env or _prod_cors_origins_env == '*':
-        # Production should have specific origins defined. Allowing '*' is a high risk.
-        # If this service is truly public and needs to allow '*', this check should be reconsidered or made configurable.
-        # For most web applications, specific frontend domains should be listed.
-        raise ValueError(
-            "CRITICAL SECURITY RISK: Production CORS_ORIGINS environment variable is not set to specific domains, or is set to '*'. "
-            "Set CORS_ORIGINS to a comma-separated list of your frontend domain(s)."
+        print(
+            "CRITICAL WARNING: Production CORS_ORIGINS environment variable is not set, is empty, or is set to '*'. "
+            "This is insecure for production environments. Defaulting CORS_ORIGINS to an empty list (`[]`), "
+            "which will disallow all cross-origin requests. "
+            "Please set the CORS_ORIGINS environment variable to a comma-separated list of your specific frontend domain(s).",
+            flush=True
         )
-    CORS_ORIGINS = _prod_cors_origins_env # Use the validated environment variable value
+        CORS_ORIGINS = []  # Default to empty list, effectively disallowing all CORS requests
+    else:
+        # If _prod_cors_origins_env is set and not a wildcard, use its value.
+        # This value is expected to be a comma-separated string of origins.
+        # Flask-CORS or app/__init__.py will handle parsing this string.
+        CORS_ORIGINS = _prod_cors_origins_env
 
     # Check if using default SQLite in production if DATABASE_URL is not explicitly set
     # This check relies on how _calculate_database_uri constructs the default URI.
