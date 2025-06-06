@@ -15,7 +15,7 @@ const StatCard = ({ title, value, icon, change, changeType, linkTo, accentColor 
           <StatNumber fontSize="2xl" fontWeight="bold" color="gray.700">{value}</StatNumber>
           {change && (
             <StatHelpText>
-              <StatArrow type={changeType === 'increase' ? 'increase' : 'decrease'} />
+              {changeType && <StatArrow type={changeType === 'increase' ? 'increase' : 'decrease'} />}
               {change}
             </StatHelpText>
           )}
@@ -26,8 +26,8 @@ const StatCard = ({ title, value, icon, change, changeType, linkTo, accentColor 
       </Box>
     </Flex>
     {linkTo && (
-      <Button as={RouterLink} to={linkTo} size="sm" colorScheme={accentColor} variant="link" mt={4}>
-        View Details &rarr;
+      <Button as={RouterLink} to={linkTo} size="sm" colorScheme={accentColor} variant="link" mt={4} rightIcon={<Text as="span">&rarr;</Text>}>
+        View Details
       </Button>
     )}
   </Box>
@@ -42,6 +42,7 @@ const QuickActionButton = ({ label, icon, linkTo, colorScheme }) => (
     variant="solid"
     size="lg"
     w={{ base: '100%', md: 'auto' }}
+    flexGrow={{ base: 1, md: 0 }} // Allow buttons to grow on mobile if in a Flex container
   >
     {label}
   </Button>
@@ -57,7 +58,7 @@ const DashboardPage = () => {
     newPatientsThisWeek: 8,
     newPatientsChange: '+5%',
     lowStockItems: 3,
-    lowStockItemsNames: 'Contact Lenses, Eye Drops X',
+    lowStockItemsNames: 'Lenses, Drops',
     revenueThisMonth: '$12,450',
     revenueTarget: '$15,000',
   };
@@ -65,7 +66,7 @@ const DashboardPage = () => {
   return (
     <Box p={{ base: 4, md: 6 }}>
       <Heading as="h2" size="lg" mb={6} color="brand.700" fontFamily="heading">
-        Welcome, {user?.name || 'User'}!
+        Welcome, {user?.username || 'User'}!
       </Heading>
 
       <SimpleGrid columns={{ base: 1, md: 2, lg: 4 }} spacing={6} mb={8}>
@@ -108,8 +109,8 @@ const DashboardPage = () => {
         <Heading as="h3" size="md" mb={6} color="gray.700" fontFamily="heading">
           Quick Actions
         </Heading>
-        <VStack spacing={4} align="stretch" direction={{ base: 'column', md: 'row' }} >
-          <Flex wrap="wrap" gap={4}>
+        {/* Using Flex directly for better control over button wrapping and spacing */}
+        <Flex wrap="wrap" gap={4} direction={{ base: 'column', sm: 'row' }} > 
             <QuickActionButton 
               label="New Appointment"
               icon={FiPlusCircle}
@@ -128,8 +129,7 @@ const DashboardPage = () => {
               linkTo="/billing?action=new" // Query param to open modal
               colorScheme="teal"
             />
-          </Flex>
-        </VStack>
+        </Flex>
       </Box>
     </Box>
   );

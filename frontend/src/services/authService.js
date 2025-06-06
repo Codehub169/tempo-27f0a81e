@@ -1,4 +1,3 @@
-// frontend/src/services/authService.js
 import api from './apiService'; // Using the default export
 
 const AUTH_STORAGE_KEY = 'eyeClinicUser';
@@ -12,9 +11,9 @@ const TOKEN_STORAGE_KEY = 'eyeClinicUserToken';
 export const loginUser = async (credentials) => {
   try {
     const response = await api.post('/auth/login', credentials);
-    // Assuming the backend returns an object like { user: { ... }, token: '...' }
-    if (response && response.token && response.user) {
-      localStorage.setItem(TOKEN_STORAGE_KEY, response.token);
+    // Assuming the backend returns an object like { user: { ... }, access_token: '...' }
+    if (response && response.access_token && response.user) {
+      localStorage.setItem(TOKEN_STORAGE_KEY, response.access_token);
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(response.user));
       return response.user;
     } else {
@@ -22,7 +21,7 @@ export const loginUser = async (credentials) => {
       throw new Error('Login successful, but token or user data missing in response.');
     }
   } catch (error) {
-    console.error('Login service error:', error.message);
+    console.error('Login service error:', error.response?.data?.msg || error.message);
     // Propagate the error so UI can display it
     throw error; 
   }
@@ -36,8 +35,7 @@ export const loginUser = async (credentials) => {
 export const logoutUser = async () => {
   try {
     // Optional: Call backend logout endpoint if it exists and needs to invalidate server-side session/token.
-    // await api.post('/auth/logout');
-    // This is often good practice for security (e.g., blacklisting token).
+    // await api.post('/auth/logout'); // This is often good practice for security (e.g., blacklisting token).
   } catch (error) {
     // Log error but proceed with client-side cleanup as logout should always succeed on client.
     console.error('Backend logout API call failed:', error.message);
