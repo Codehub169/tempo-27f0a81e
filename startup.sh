@@ -16,7 +16,7 @@ if [ -f "yarn.lock" ]; then
 elif [ -f "package-lock.json" ]; then
   echo "package-lock.json found. Installing dependencies with npm..."
   # Using npm install for flexibility in dev; for strict CI, npm ci would be better.
-  npm install 
+  npm install
   echo "Building frontend application with npm..."
   npm run build
 else
@@ -117,21 +117,42 @@ if [ ! -d "migrations" ]; then
     echo "Creating initial migration script (based on current models)..."
     "$FLASK_EXEC" db migrate -m "Initial database setup"
     echo "Applying migrations (creating database tables)..."
-    "$FLASK_EXEC" db upgrade
+    if ! "$FLASK_EXEC" db upgrade; then
+        echo "ERROR: 'flask db upgrade' after init failed. Review the error message above."
+        exit 1
+    fi
 elif [ -d "migrations" ] && [ ! -f "instance/clinic.db" ]; then
     # Migrations folder exists, but DB file doesn't (e.g., clean environment with existing migration scripts).
     echo "Database file instance/clinic.db not found, but migrations folder exists."
     echo "Applying all existing migrations..."
-    "$FLASK_EXEC" db upgrade
+    if ! "$FLASK_EXEC" db upgrade; then
+        echo "ERROR: 'flask db upgrade' for existing migrations (no DB file) failed. Review the error message above."
+        exit 1
+    fi
 else
     # Both migrations folder and DB file exist.
     echo "Database and migrations folder exist."
+
+    # First, try to bring the database to the latest known migration version.
+    echo "Attempting to apply any existing pending migrations first..."
+    if ! "$FLASK_EXEC" db upgrade; then
+        echo "ERROR: Initial 'flask db upgrade' failed. The database might be in an inconsistent state or a migration script is faulty."
+        echo "Review migration scripts and database state. For development, deleting 'instance/clinic.db' might help if data is not critical."
+        exit 1
+    fi
+    echo "Initial 'flask db upgrade' successful or no pending migrations found."
+
     echo "Checking for model changes and creating new migration if needed..."
     # This command will only create a new migration file if changes are detected.
-    # It's safe to run even if there are no changes.
     "$FLASK_EXEC" db migrate -m "Automated startup migration check"
-    echo "Applying any pending migrations..."
-    "$FLASK_EXEC" db upgrade # Applies newly created or any existing unapplied revisions
+
+    # Finally, apply any newly created (or still pending after the first upgrade) migrations.
+    echo "Applying any new or remaining pending migrations..."
+    if ! "$FLASK_EXEC" db upgrade; then
+        echo "ERROR: 'flask db upgrade' after 'migrate' failed. A newly generated migration script might be faulty or there's another issue."
+        exit 1
+    fi
+    echo "Final 'flask db upgrade' successful."
 fi
 echo "Database migrations complete."
 
