@@ -26,7 +26,8 @@ def register():
         # Role will use schema's default ('receptionist') if not provided in the payload
         loaded_data = user_schema.load(data)
     except ValidationError as err:
-        return jsonify(err.messages), HTTPStatus.BAD_REQUEST
+        # Ensure error messages are in a consistent format, e.g., {"errors": err.messages}
+        return jsonify({"msg": "Validation failed", "errors": err.messages}), HTTPStatus.BAD_REQUEST
 
     # Check for existing user using validated data
     if User.query.filter_by(email=loaded_data['email']).first():
@@ -38,7 +39,7 @@ def register():
         new_user = User(
             username=loaded_data['username'],
             email=loaded_data['email'],
-            role=loaded_data['role']  # Role from schema (includes default 'receptionist')
+            role=loaded_data.get('role', 'receptionist')  # Ensure role is explicitly fetched with default
         )
         new_user.set_password(loaded_data['password']) # Password from schema (load_only field)
         
@@ -57,11 +58,10 @@ def register():
             refresh_token=refresh_token, 
             user=user_details
         ), HTTPStatus.CREATED
-    except Exception as e:
+    except Exception as e: # Catching a more general exception after specific ones
         db.session.rollback()
-        current_app.logger.error(f"Error during user registration (db persistence or token generation): {str(e)}")
-        # Generic error message for client, specific error logged on server
-        return jsonify({"msg": "Error processing registration", "error": "An internal error occurred during registration."}), HTTPStatus.INTERNAL_SERVER_ERROR
+        current_app.logger.error(f"Unhandled error during user registration: {str(e)}", exc_info=True)
+        return jsonify({"msg": "Registration failed due to an unexpected server error. Please contact support or try again later."}), HTTPStatus.INTERNAL_SERVER_ERROR
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
