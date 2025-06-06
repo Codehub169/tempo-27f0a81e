@@ -1,6 +1,8 @@
 import os
 from datetime import timedelta
 
+# print("DEBUG: Loading config.py") # Optional: for very basic module load tracing
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 # INSTANCE_FOLDER_PATH is the absolute path to the 'backend/instance' directory
 INSTANCE_FOLDER_PATH = os.path.join(BASE_DIR, '..', 'instance')
@@ -18,19 +20,19 @@ def _calculate_database_uri(env_var_key, default_db_filename, instance_path, is_
         # These need to be resolved relative to the instance folder.
         if env_uri.startswith('sqlite:///') and not env_uri.startswith('sqlite:////'):
             db_name = env_uri[len('sqlite:///'):]
-            # It's assumed db_name will be a valid filename part if this pattern matches.
-            # e.g., for 'sqlite:///clinic.db', db_name is 'clinic.db'.
-            # An empty db_name (from 'sqlite:///') would be problematic but is an invalid URI for a file DB.
-            if not db_name: # Handle 'sqlite:///' case specifically if it could occur and be invalid
+            if not db_name: # Handle 'sqlite:///' case (empty database name)
+                 print(f"ERROR: Invalid relative SQLite URI: {env_uri}. Database name cannot be empty.")
                  raise ValueError(f"Invalid relative SQLite URI: {env_uri}. Database name cannot be empty.")
-            return f'sqlite:///{os.path.join(instance_path, db_name)}'
+            abs_db_path = os.path.join(instance_path, db_name)
+            return f'sqlite:///{abs_db_path}' # Forms sqlite:////<absolute_path_to_db>
         
         # Handles absolute SQLite paths (e.g., sqlite:////path/to/db) 
         # or other database types (e.g., postgresql://user:pass@host/db)
         return env_uri
     
     # Default to a SQLite file in the instance folder if the environment variable is not set
-    return f'sqlite:///{os.path.join(instance_path, default_db_filename)}'
+    abs_db_path = os.path.join(instance_path, default_db_filename)
+    return f'sqlite:///{abs_db_path}'
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'a_very_secret_key_that_should_be_changed'
@@ -44,20 +46,24 @@ class Config:
     if not os.path.exists(INSTANCE_FOLDER_PATH):
         try:
             os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
-            print(f"INFO: Created instance folder at {INSTANCE_FOLDER_PATH}")
+            print(f"INFO: Config: Created instance folder at {INSTANCE_FOLDER_PATH}")
         except OSError as e:
-            print(f"CRITICAL OS ERROR: Could not create instance folder at {INSTANCE_FOLDER_PATH}: {e}. SQLite database operations will likely fail.")
+            print(f"CRITICAL: Config: Could not create instance folder at {INSTANCE_FOLDER_PATH}: {e}. SQLite database operations will likely fail.")
             raise OSError(f"Failed to create critical instance folder {INSTANCE_FOLDER_PATH}: {e}") from e
+    # else:
+        # print(f"INFO: Config: Instance folder at {INSTANCE_FOLDER_PATH} already exists.") # Optional: for verbosity
 
     SQLALCHEMY_DATABASE_URI = _calculate_database_uri(
         'DATABASE_URL', 
         'clinic.db', 
         INSTANCE_FOLDER_PATH
     )
+    # print(f"DEBUG: Config.SQLALCHEMY_DATABASE_URI set to: {SQLALCHEMY_DATABASE_URI}")
 
 class DevelopmentConfig(Config):
     DEBUG = True
-    FLASK_ENV = 'development'
+    FLASK_ENV = 'development' # FLASK_ENV is a convention; DEBUG is what Flask uses internally.
+    # print(f"DEBUG: DevelopmentConfig: SQLALCHEMY_DATABASE_URI is {Config.SQLALCHEMY_DATABASE_URI}")
     # SQLALCHEMY_ECHO = True # Uncomment for debugging SQL queries
 
 class TestingConfig(Config):
@@ -66,10 +72,11 @@ class TestingConfig(Config):
     
     SQLALCHEMY_DATABASE_URI = _calculate_database_uri(
         'TEST_DATABASE_URL', 
-        'test_clinic.db', 
+        'test_clinic.db', # Default test DB filename if TEST_DATABASE_URL not set
         INSTANCE_FOLDER_PATH, 
         is_testing_config=True
     )
+    # print(f"DEBUG: TestingConfig.SQLALCHEMY_DATABASE_URI set to: {SQLALCHEMY_DATABASE_URI}")
 
     JWT_SECRET_KEY = 'test_jwt_secret_key_for_testing_do_not_use_in_prod'
     SECRET_KEY = 'test_secret_key_for_testing_do_not_use_in_prod'
@@ -78,18 +85,22 @@ class TestingConfig(Config):
 class ProductionConfig(Config):
     DEBUG = False
     FLASK_ENV = 'production'
+    # print(f"DEBUG: ProductionConfig: SQLALCHEMY_DATABASE_URI is {Config.SQLALCHEMY_DATABASE_URI}")
 
+    # Critical security checks for production:
     if Config.SECRET_KEY == 'a_very_secret_key_that_should_be_changed':
+        print("CRITICAL: Production SECRET_KEY is not set or is using the weak default. Ensure it's set via env var.", flush=True)
         raise ValueError("CRITICAL SECURITY RISK: Production SECRET_KEY is not set or is using the weak default. Set a strong, random SECRET_KEY environment variable.")
     
     if Config.JWT_SECRET_KEY == 'another_super_secret_jwt_key':
+        print("CRITICAL: Production JWT_SECRET_KEY is not set or is using the weak default. Ensure it's set via env var.", flush=True)
         raise ValueError("CRITICAL SECURITY RISK: Production JWT_SECRET_KEY is not set or is using the weak default. Set a strong, random JWT_SECRET_KEY environment variable.")
     
     # Override and validate CORS_ORIGINS for production
     _prod_cors_origins_env = os.environ.get('CORS_ORIGINS')
     if not _prod_cors_origins_env or _prod_cors_origins_env == '*':
         print(
-            "CRITICAL WARNING: Production CORS_ORIGINS environment variable is not set, is empty, or is set to '*'. "
+            "WARNING: Production CORS_ORIGINS environment variable is not set, is empty, or is set to '*'. "
             "This is insecure for production environments. Defaulting CORS_ORIGINS to an empty list (`[]`), "
             "which will disallow all cross-origin requests. "
             "Please set the CORS_ORIGINS environment variable to a comma-separated list of your specific frontend domain(s).",
@@ -97,26 +108,22 @@ class ProductionConfig(Config):
         )
         CORS_ORIGINS = []  # Default to empty list, effectively disallowing all CORS requests
     else:
-        # If _prod_cors_origins_env is set and not a wildcard, use its value.
-        # This value is expected to be a comma-separated string of origins.
-        # Flask-CORS or app/__init__.py will handle parsing this string.
-        CORS_ORIGINS = _prod_cors_origins_env
+        CORS_ORIGINS = _prod_cors_origins_env # Expected to be a comma-separated string or a valid single origin
+    # print(f"DEBUG: ProductionConfig.CORS_ORIGINS set to: {CORS_ORIGINS}")
 
-    # Check if using default SQLite in production if DATABASE_URL is not explicitly set
-    # This check relies on how _calculate_database_uri constructs the default URI.
+    # Check if using default SQLite in production when DATABASE_URL is not explicitly set
     default_sqlite_uri_in_prod = f'sqlite:///{os.path.join(INSTANCE_FOLDER_PATH, "clinic.db")}'
-    current_db_uri = Config.SQLALCHEMY_DATABASE_URI # Inherited and potentially from DATABASE_URL env var
-    if current_db_uri == default_sqlite_uri_in_prod and not os.environ.get('DATABASE_URL'):
-        # This means SQLALCHEMY_DATABASE_URI fell back to the default SQLite path, 
-        # and DATABASE_URL was not set to override it.
-        print("CRITICAL WARNING: Production environment is using the default SQLite database. "
+    if Config.SQLALCHEMY_DATABASE_URI == default_sqlite_uri_in_prod and not os.environ.get('DATABASE_URL'):
+        print("WARNING: Production environment is using the default SQLite database 'clinic.db' because DATABASE_URL is not set. "
               "Ensure DATABASE_URL environment variable is set to a robust, production-grade database service (e.g., PostgreSQL, MySQL).", flush=True)
-        # Depending on policy, you might want to raise an error here to prevent startup with SQLite in prod.
+        # Consider raising ValueError for stricter policy:
         # raise ValueError("Production environment must use a configured DATABASE_URL for a production-grade database.")
 
 config_by_name = {
     'development': DevelopmentConfig,
     'testing': TestingConfig,
     'production': ProductionConfig,
-    'default': DevelopmentConfig
+    'default': DevelopmentConfig # Default to Development if FLASK_ENV is not set or invalid
 }
+
+# print(f"DEBUG: config.py loaded. Available configurations: {list(config_by_name.keys())}")
