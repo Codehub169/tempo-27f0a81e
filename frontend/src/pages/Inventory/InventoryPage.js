@@ -1,40 +1,65 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box, Button, useDisclosure, useToast, Heading, Icon, Table, Thead, Tbody, Tr, Th, Td, IconButton, HStack, Text, Flex, Tag,
-  Modal, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalBody, ModalCloseButton, FormControl, FormLabel, Input, VStack, Select, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper, NumberDecrementStepper
+  Modal, ModalOverlay, ModalContent, ModalHeader, ModalFooter, ModalBody, ModalCloseButton, FormControl, FormLabel, Input, VStack, Select, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper, NumberDecrementStepper, Textarea,
+  Spinner, Alert, AlertIcon, FormErrorMessage
 } from '@chakra-ui/react';
 import { FiPlus, FiEdit, FiTrash2, FiPackage, FiDollarSign, FiAlertTriangle, FiTag, FiFilter } from 'react-icons/fi';
+import api from '../../services/apiService';
 
-// Mock data - replace with API calls
-const mockInventoryData = [
-  { id: 'i1', itemName: 'Contact Lens Solution (360ml)', category: 'Lens Care', stock: 50, price: 12.99, reorderLevel: 20 },
-  { id: 'i2', itemName: 'Eye Drops - Dry Eyes (10ml)', category: 'Medication', stock: 15, price: 8.50, reorderLevel: 10 },
-  { id: 'i3', itemName: 'Reading Glasses (+1.5)', category: 'Eyewear', stock: 30, price: 25.00, reorderLevel: 15 },
-  { id: 'i4', itemName: 'Sunglasses UV400', category: 'Eyewear', stock: 5, price: 75.00, reorderLevel: 5 },
-  { id: 'i5', itemName: 'Lens Cleaning Wipes (100pcs)', category: 'Accessories', stock: 60, price: 5.99, reorderLevel: 25 },
-];
-
-const itemCategories = ['Lens Care', 'Medication', 'Eyewear', 'Accessories', 'Other'];
-const LOW_STOCK_THRESHOLD_PERCENTAGE = 0.25; // Low stock if stock <= reorderLevel OR stock <= 25% of initial high stock (example logic)
+const itemCategories = ['Lens Care', 'Medication', 'Eyewear', 'Accessories', 'Consumables', 'Equipment', 'Service', 'Other'];
 
 const InventoryPage = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
-  const [inventory, setInventory] = useState(mockInventoryData);
+  const [inventory, setInventory] = useState([]);
   const [selectedItem, setSelectedItem] = useState(null);
   const [currentItemData, setCurrentItemData] = useState({});
+  const [formErrors, setFormErrors] = useState({});
   const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const initialFormState = useCallback(() => ({
+    name: '', 
+    category: '', 
+    description: '',
+    quantity_on_hand: 0, 
+    unit_price: 0.00, 
+    reorder_level: 5, 
+    supplier_info: ''
+  }), []);
+
+  const fetchInventory = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.get('/inventory');
+      setInventory(data || []);
+    } catch (err) {
+      console.error("Error fetching inventory:", err);
+      setError(err.response?.data?.message || err.message || 'Failed to fetch inventory');
+      toast({ title: 'Error Fetching Inventory', description: err.response?.data?.message || err.message, status: 'error', duration: 5000, isClosable: true });
+    }
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(() => {
+    fetchInventory();
+  }, [fetchInventory]);
 
   const handleAddItemClick = () => {
     setSelectedItem(null);
-    setCurrentItemData({ itemName: '', category: '', stock: 0, price: 0.00, reorderLevel: 5 });
+    setCurrentItemData(initialFormState());
+    setFormErrors({});
     setIsEditing(false);
     onOpen();
   };
 
   const handleEditItem = (item) => {
     setSelectedItem(item);
-    setCurrentItemData(item);
+    setCurrentItemData({ ...initialFormState(), ...item });
+    setFormErrors({});
     setIsEditing(true);
     onOpen();
   };
@@ -42,55 +67,103 @@ const InventoryPage = () => {
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     setCurrentItemData(prev => ({ ...prev, [name]: value }));
+    if (formErrors[name]) {
+      setFormErrors(prev => ({ ...prev, [name]: null }));
+    }
   };
 
   const handleNumericFormChange = (name, valueAsString, valueAsNumber) => {
-    setCurrentItemData(prev => ({ ...prev, [name]: valueAsNumber }));
+    setCurrentItemData(prev => ({ ...prev, [name]: isNaN(valueAsNumber) ? 0 : valueAsNumber }));
+    if (formErrors[name]) {
+        setFormErrors(prev => ({ ...prev, [name]: null }));
+    }
   };
 
-  const handleSaveItem = () => {
-    if (!currentItemData.itemName || !currentItemData.category || currentItemData.stock < 0 || currentItemData.price <= 0) {
-      toast({ title: 'Error', description: 'Please fill all required fields with valid values.', status: 'error', duration: 3000, isClosable: true });
-      return;
-    }
-
-    if (isEditing && selectedItem) {
-      setInventory(inventory.map(item => item.id === selectedItem.id ? { ...item, ...currentItemData } : item));
-      toast({ title: 'Item Updated', status: 'success', duration: 3000, isClosable: true });
-    } else {
-      const newItem = { ...currentItemData, id: Date.now().toString() }; // Mock ID
-      setInventory([...inventory, newItem]);
-      toast({ title: 'Item Added', status: 'success', duration: 3000, isClosable: true });
-    }
-    onClose();
+  const validateForm = () => {
+    const errors = {};
+    if (!currentItemData.name?.trim()) errors.name = 'Item Name is required.';
+    if (!currentItemData.category?.trim()) errors.category = 'Category is required.';
+    if (currentItemData.quantity_on_hand === null || currentItemData.quantity_on_hand < 0) errors.quantity_on_hand = 'Stock Level must be 0 or greater.';
+    if (currentItemData.unit_price === null || currentItemData.unit_price <= 0) errors.unit_price = 'Unit Price must be greater than 0.';
+    if (currentItemData.reorder_level !== null && currentItemData.reorder_level < 0) errors.reorder_level = 'Reorder Level must be 0 or greater.';
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
-  const handleDeleteItem = (itemId) => {
-    setInventory(inventory.filter(item => item.id !== itemId));
-    toast({ title: 'Item Deleted', status: 'warning', duration: 3000, isClosable: true });
+  const handleSaveItem = async () => {
+    if (!validateForm()) {
+        toast({ title: 'Validation Error', description: 'Please correct the errors in the form.', status: 'error', duration: 3000, isClosable: true });
+        return;
+    }
+
+    const payload = {
+        name: currentItemData.name.trim(),
+        category: currentItemData.category.trim(),
+        description: currentItemData.description?.trim() || '',
+        quantity_on_hand: parseInt(currentItemData.quantity_on_hand) || 0,
+        reorder_level: parseInt(currentItemData.reorder_level) || 0,
+        unit_price: parseFloat(currentItemData.unit_price) || 0.00,
+        supplier_info: currentItemData.supplier_info?.trim() || '',
+    };
+
+    try {
+      if (isEditing && selectedItem) {
+        await api.put(`/inventory/${selectedItem.id}`, payload);
+        toast({ title: 'Item Updated', status: 'success', duration: 3000, isClosable: true });
+      } else {
+        await api.post('/inventory', payload);
+        toast({ title: 'Item Added', status: 'success', duration: 3000, isClosable: true });
+      }
+      fetchInventory();
+      onClose();
+    } catch (err) {
+      console.error("Error saving inventory item:", err);
+      toast({ title: 'Save Failed', description: err.response?.data?.message || err.message || 'Could not save item.', status: 'error', duration: 5000, isClosable: true });
+    }
+  };
+
+  const handleDeleteItem = async (itemId) => {
+    try {
+      await api.delete(`/inventory/${itemId}`);
+      toast({ title: 'Item Deleted', status: 'warning', duration: 3000, isClosable: true });
+      fetchInventory();
+    } catch (err) {
+      console.error("Error deleting inventory item:", err);
+      toast({ title: 'Delete Failed', description: err.response?.data?.message || err.message, status: 'error', duration: 5000, isClosable: true });
+    }
   };
 
   const isLowStock = (item) => {
-    return item.stock <= item.reorderLevel || item.stock <= (item.reorderLevel * (1/LOW_STOCK_THRESHOLD_PERCENTAGE) * LOW_STOCK_THRESHOLD_PERCENTAGE); // Simplified logic
+    return item.quantity_on_hand <= item.reorder_level;
   };
 
+  if (loading && !inventory.length) return <Box p={4} textAlign="center"><Spinner size="xl" /><Text mt={2}>Loading inventory...</Text></Box>;
+  if (error && !inventory.length) return <Alert status="error" variant="subtle"><AlertIcon />{error}</Alert>;
+
   return (
-    <Box>
-      <Flex justify="space-between" align="center" mb={6}>
+    <Box p={{ base: 2, md: 4 }}>
+      <Flex justify="space-between" align="center" mb={6} direction={{ base: 'column', md: 'row' }} gap={2}>
         <Heading as="h1" size="lg">Inventory Management</Heading>
-        <Button leftIcon={<FiPlus />} colorScheme="blue" onClick={handleAddItemClick}>
+        <Button leftIcon={<FiPlus />} colorScheme="brand" onClick={handleAddItemClick} alignSelf={{ base: 'stretch', md: 'auto' }}>
           Add New Item
         </Button>
       </Flex>
 
       <Box bg="white" p={0} borderRadius="lg" shadow="card" overflowX="auto">
-        {inventory.length > 0 ? (
-          <Table variant="simple">
+        {loading && inventory.length > 0 && <Box textAlign="center" py={4}><Spinner /></Box>}
+        {!loading && inventory.length === 0 && (
+          <Box p={6} textAlign="center">
+            <Text>No inventory items found. Add an item to get started.</Text>
+          </Box>
+        )}
+        {!loading && inventory.length > 0 && (
+          <Table variant="simple" size={{base: "sm", md: "md"}}>
             <Thead>
               <Tr>
                 <Th><Icon as={FiPackage} mr={2} />Item Name</Th>
                 <Th><Icon as={FiTag} mr={2} />Category</Th>
-                <Th isNumeric><Icon as={FiFilter} mr={2} />Stock Level</Th>
+                <Th isNumeric><Icon as={FiFilter} mr={2} />Stock</Th>
                 <Th isNumeric><Icon as={FiDollarSign} mr={2} />Price</Th>
                 <Th>Status</Th>
                 <Th>Actions</Th>
@@ -99,10 +172,10 @@ const InventoryPage = () => {
             <Tbody>
               {inventory.map((item) => (
                 <Tr key={item.id}>
-                  <Td fontWeight="medium">{item.itemName}</Td>
+                  <Td fontWeight="medium">{item.name}</Td>
                   <Td>{item.category}</Td>
-                  <Td isNumeric>{item.stock}</Td>
-                  <Td isNumeric>${item.price.toFixed(2)}</Td>
+                  <Td isNumeric>{item.quantity_on_hand}</Td>
+                  <Td isNumeric>${parseFloat(item.unit_price).toFixed(2)}</Td>
                   <Td>
                     {isLowStock(item) && (
                       <Tag colorScheme="orange" size="sm">
@@ -111,7 +184,7 @@ const InventoryPage = () => {
                     )}
                   </Td>
                   <Td>
-                    <HStack spacing={2}>
+                    <HStack spacing={1}>
                       <IconButton icon={<FiEdit />} aria-label="Edit Item" size="sm" variant="ghost" colorScheme="blue" onClick={() => handleEditItem(item)} />
                       <IconButton icon={<FiTrash2 />} aria-label="Delete Item" size="sm" variant="ghost" colorScheme="red" onClick={() => handleDeleteItem(item.id)} />
                     </HStack>
@@ -120,71 +193,70 @@ const InventoryPage = () => {
               ))}
             </Tbody>
           </Table>
-        ) : (
-          <Box p={6} textAlign="center">
-            <Text>No inventory items found. Add an item to get started.</Text>
-          </Box>
         )}
       </Box>
 
-      {/* Inventory Item Add/Edit Modal */}
-      <Modal isOpen={isOpen} onClose={onClose} scrollBehavior="inside">
+      {isOpen && <Modal isOpen={isOpen} onClose={onClose} scrollBehavior="inside" isCentered>
         <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>{isEditing ? 'Edit Inventory Item' : 'Add New Inventory Item'}</ModalHeader>
+        <ModalContent as="form" onSubmit={(e) => { e.preventDefault(); handleSaveItem(); }}>
+          <ModalHeader borderBottomWidth="1px">{isEditing ? 'Edit Inventory Item' : 'Add New Inventory Item'}</ModalHeader>
           <ModalCloseButton />
-          <ModalBody>
+          <ModalBody py={6}>
             <VStack spacing={4}>
-              <FormControl isRequired>
+              <FormControl isRequired isInvalid={!!formErrors.name}>
                 <FormLabel>Item Name</FormLabel>
-                <Input name="itemName" value={currentItemData.itemName || ''} onChange={handleFormChange} placeholder="e.g., Eye Drops Model X" />
+                <Input name="name" value={currentItemData.name || ''} onChange={handleFormChange} placeholder="e.g., Eye Drops Model X" />
+                {formErrors.name && <FormErrorMessage>{formErrors.name}</FormErrorMessage>}
               </FormControl>
-              <FormControl isRequired>
+              <FormControl isRequired isInvalid={!!formErrors.category}>
                 <FormLabel>Category</FormLabel>
                 <Select name="category" value={currentItemData.category || ''} onChange={handleFormChange} placeholder="Select category">
                   {itemCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </Select>
-              </FormControl>
-              <FormControl isRequired>
-                <FormLabel>Stock Level</FormLabel>
-                <NumberInput name="stock" value={currentItemData.stock || 0} min={0} onChange={(valueAsString, valueAsNumber) => handleNumericFormChange('stock', valueAsString, valueAsNumber)}>
-                  <NumberInputField />
-                  <NumberInputStepper>
-                    <NumberIncrementStepper />
-                    <NumberDecrementStepper />
-                  </NumberInputStepper>
-                </NumberInput>
-              </FormControl>
-              <FormControl isRequired>
-                <FormLabel>Price</FormLabel>
-                <NumberInput name="price" value={currentItemData.price || 0.00} min={0.01} precision={2} step={0.01} onChange={(valueAsString, valueAsNumber) => handleNumericFormChange('price', valueAsString, valueAsNumber)}>
-                  <NumberInputField placeholder="e.g., 10.99" />
-                  <NumberInputStepper>
-                    <NumberIncrementStepper />
-                    <NumberDecrementStepper />
-                  </NumberInputStepper>
-                </NumberInput>
+                {formErrors.category && <FormErrorMessage>{formErrors.category}</FormErrorMessage>}
               </FormControl>
               <FormControl>
-                <FormLabel>Reorder Level</FormLabel>
-                 <NumberInput name="reorderLevel" value={currentItemData.reorderLevel || 5} min={0} onChange={(valueAsString, valueAsNumber) => handleNumericFormChange('reorderLevel', valueAsString, valueAsNumber)}>
+                <FormLabel>Description</FormLabel>
+                <Textarea name="description" value={currentItemData.description || ''} onChange={handleFormChange} placeholder="Item description" />
+              </FormControl>
+              <FormControl isRequired isInvalid={!!formErrors.quantity_on_hand}>
+                <FormLabel>Stock Level</FormLabel>
+                <NumberInput name="quantity_on_hand" value={currentItemData.quantity_on_hand || 0} min={0} onChange={(valStr, valNum) => handleNumericFormChange('quantity_on_hand', valStr, valNum)}>
                   <NumberInputField />
-                  <NumberInputStepper>
-                    <NumberIncrementStepper />
-                    <NumberDecrementStepper />
-                  </NumberInputStepper>
+                  <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
                 </NumberInput>
+                {formErrors.quantity_on_hand && <FormErrorMessage>{formErrors.quantity_on_hand}</FormErrorMessage>}
+              </FormControl>
+              <FormControl isRequired isInvalid={!!formErrors.unit_price}>
+                <FormLabel>Unit Price</FormLabel>
+                <NumberInput name="unit_price" value={currentItemData.unit_price || 0.00} min={0.01} precision={2} step={0.01} onChange={(valStr, valNum) => handleNumericFormChange('unit_price', valStr, valNum)}>
+                  <NumberInputField placeholder="e.g., 10.99" />
+                  <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
+                </NumberInput>
+                {formErrors.unit_price && <FormErrorMessage>{formErrors.unit_price}</FormErrorMessage>}
+              </FormControl>
+              <FormControl isInvalid={!!formErrors.reorder_level}>
+                <FormLabel>Reorder Level</FormLabel>
+                 <NumberInput name="reorder_level" value={currentItemData.reorder_level || 0} min={0} onChange={(valStr, valNum) => handleNumericFormChange('reorder_level', valStr, valNum)}>
+                  <NumberInputField />
+                  <NumberInputStepper><NumberIncrementStepper /><NumberDecrementStepper /></NumberInputStepper>
+                </NumberInput>
+                {formErrors.reorder_level && <FormErrorMessage>{formErrors.reorder_level}</FormErrorMessage>}
+              </FormControl>
+              <FormControl>
+                <FormLabel>Supplier Info</FormLabel>
+                <Input name="supplier_info" value={currentItemData.supplier_info || ''} onChange={handleFormChange} placeholder="Supplier name or ID" />
               </FormControl>
             </VStack>
           </ModalBody>
-          <ModalFooter>
+          <ModalFooter borderTopWidth="1px">
             <Button variant="ghost" mr={3} onClick={onClose}>Cancel</Button>
-            <Button colorScheme="blue" onClick={handleSaveItem}>
+            <Button type="submit" colorScheme="brand">
               {isEditing ? 'Save Changes' : 'Add Item'}
             </Button>
           </ModalFooter>
         </ModalContent>
-      </Modal>
+      </Modal>}
     </Box>
   );
 };

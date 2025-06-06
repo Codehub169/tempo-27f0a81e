@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Box, SimpleGrid, Heading, Text, Icon, Flex, Stat, StatLabel, StatNumber, StatHelpText, StatArrow, Button, VStack
+  Box, SimpleGrid, Heading, Text, Icon, Flex, Stat, StatLabel, StatNumber, StatHelpText, StatArrow, Button, useToast, Spinner
 } from '@chakra-ui/react';
 import { FiCalendar, FiUsers, FiBox, FiDollarSign, FiPlusCircle, FiUserPlus, FiFileText } from 'react-icons/fi';
-import { Link as RouterLink } from 'react-router-dom'; // For navigation
-import { useAuth } from '../../contexts/AuthContext'; // To get user info
+import { Link as RouterLink } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import api from '../../services/apiService';
 
 const StatCard = ({ title, value, icon, change, changeType, linkTo, accentColor }) => (
   <Box p={5} shadow="card" borderWidth="1px" borderRadius="xl" bg="white">
@@ -42,26 +43,90 @@ const QuickActionButton = ({ label, icon, linkTo, colorScheme }) => (
     variant="solid"
     size="lg"
     w={{ base: '100%', md: 'auto' }}
-    flexGrow={{ base: 1, md: 0 }} // Allow buttons to grow on mobile if in a Flex container
+    flexGrow={{ base: 1, md: 0 }}
   >
     {label}
   </Button>
 );
 
 const DashboardPage = () => {
-  const { user } = useAuth(); // Get user info for personalization if needed
+  const { user } = useAuth();
+  const toast = useToast();
+  const [dashboardData, setDashboardData] = useState({
+    todayAppointments: 0,
+    newPatientsThisWeek: 0,
+    lowStockItems: 0,
+    lowStockItemsNames: '',
+    revenueThisMonth: '$0.00',
+    revenueTarget: '$15,000', // Target might be static or from settings
+    loading: true,
+  });
 
-  // Mock data - replace with API calls
-  const dashboardData = {
-    todayAppointments: 12,
-    upcomingAppointmentsNextHour: 3,
-    newPatientsThisWeek: 8,
-    newPatientsChange: '+5%',
-    lowStockItems: 3,
-    lowStockItemsNames: 'Lenses, Drops',
-    revenueThisMonth: '$12,450',
-    revenueTarget: '$15,000',
-  };
+  useEffect(() => {
+    const fetchData = async () => {
+      setDashboardData(prev => ({ ...prev, loading: true }));
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const oneWeekAgo = new Date();
+        oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+        const [appointmentsResponse, patientsResponse, inventoryResponse, revenueReportResponse] = await Promise.all([
+          api.get('/appointments'), // Consider backend filtering: /appointments?date=${today}
+          api.get('/patients'), // Consider backend filtering: /patients?created_after=${oneWeekAgo.toISOString()}
+          api.get('/inventory?low_stock=true'),
+          api.get('/reports/generate?report_type=revenue') // Consider backend filtering for current month
+        ]);
+
+        let todayAppointmentsCount = 0;
+        if (appointmentsResponse) {
+            todayAppointmentsCount = appointmentsResponse.filter(appt => appt.appointment_datetime && appt.appointment_datetime.startsWith(today)).length;
+        }
+
+        let newPatientsThisWeekCount = 0;
+        if (patientsResponse) {
+            newPatientsThisWeekCount = patientsResponse.filter(p => p.created_at && new Date(p.created_at) >= oneWeekAgo).length;
+        }
+
+        let lowStockItemsCount = 0;
+        let lowStockItemsNamesList = [];
+        if (inventoryResponse) {
+            lowStockItemsCount = inventoryResponse.length;
+            lowStockItemsNamesList = inventoryResponse.slice(0, 2).map(item => item.name); 
+        }
+
+        let revenueThisMonthValue = '$0.00';
+        if (revenueReportResponse && revenueReportResponse.data?.total_revenue) {
+            revenueThisMonthValue = `$${parseFloat(revenueReportResponse.data.total_revenue).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+
+        setDashboardData(prev => ({
+          ...prev,
+          todayAppointments: todayAppointmentsCount,
+          newPatientsThisWeek: newPatientsThisWeekCount,
+          lowStockItems: lowStockItemsCount,
+          lowStockItemsNames: lowStockItemsNamesList.join(', ') || (lowStockItemsCount > 0 ? 'Various items' : 'None'),
+          revenueThisMonth: revenueThisMonthValue,
+          loading: false,
+        }));
+
+      } catch (error) {
+        console.error("Error fetching dashboard data:", error);
+        toast({
+          title: 'Error fetching dashboard data',
+          description: error.response?.data?.message || error.message || 'Could not load dashboard statistics.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        setDashboardData(prev => ({ ...prev, loading: false }));
+      }
+    };
+    fetchData();
+  }, [toast]);
+
+  if (dashboardData.loading) {
+    return <Box p={4} textAlign="center"><Spinner size="xl" /> <Text mt={2}>Loading dashboard data...</Text></Box>;
+  }
 
   return (
     <Box p={{ base: 4, md: 6 }}>
@@ -74,7 +139,7 @@ const DashboardPage = () => {
           title="Today's Appointments"
           value={dashboardData.todayAppointments}
           icon={FiCalendar}
-          change={`${dashboardData.upcomingAppointmentsNextHour} upcoming`}
+          // change={`${dashboardData.upcomingAppointmentsNextHour} upcoming`} // This data point is not fetched
           linkTo="/appointments"
           accentColor="blue"
         />
@@ -82,8 +147,6 @@ const DashboardPage = () => {
           title="New Patients (Week)"
           value={dashboardData.newPatientsThisWeek}
           icon={FiUsers}
-          change={dashboardData.newPatientsChange}
-          changeType="increase"
           linkTo="/patients"
           accentColor="green"
         />
@@ -109,24 +172,23 @@ const DashboardPage = () => {
         <Heading as="h3" size="md" mb={6} color="gray.700" fontFamily="heading">
           Quick Actions
         </Heading>
-        {/* Using Flex directly for better control over button wrapping and spacing */}
         <Flex wrap="wrap" gap={4} direction={{ base: 'column', sm: 'row' }} > 
             <QuickActionButton 
               label="New Appointment"
               icon={FiPlusCircle}
-              linkTo="/appointments?action=new" // Query param to open modal
+              linkTo="/appointments?action=new" 
               colorScheme="brand"
             />
             <QuickActionButton 
               label="Add New Patient"
               icon={FiUserPlus}
-              linkTo="/patients?action=new" // Query param to open modal
+              linkTo="/patients?action=new" 
               colorScheme="green"
             />
             <QuickActionButton 
               label="Create Bill"
               icon={FiFileText}
-              linkTo="/billing?action=new" // Query param to open modal
+              linkTo="/billing?action=new" 
               colorScheme="teal"
             />
         </Flex>

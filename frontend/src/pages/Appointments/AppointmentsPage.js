@@ -1,113 +1,155 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Box, Button, VStack, useDisclosure, useToast, Heading, Text, Flex, Icon, Table, Thead, Tbody, Tr, Th, Td, Tag, IconButton, HStack } from '@chakra-ui/react';
+import { Box, Button, useDisclosure, useToast, Heading, Text, Flex, Icon, Table, Thead, Tbody, Tr, Th, Td, Tag, IconButton, HStack, Spinner, Alert, AlertIcon } from '@chakra-ui/react';
 import { FiPlus, FiEdit, FiTrash2, FiCalendar, FiClock, FiUser, FiBriefcase } from 'react-icons/fi';
 import AppointmentCalendar from '../../components/Appointments/AppointmentCalendar';
 import AppointmentModal from '../../components/Appointments/AppointmentModal';
-import { useAuth } from '../../contexts/AuthContext'; // Assuming useAuth might be needed for user-specific data in future
-
-// Mock data - replace with API calls
-const mockAppointmentsData = [
-  { id: '1', patientName: 'John Doe', patientId: 'p1', doctorName: 'Dr. Emily Carter', doctorId: 'd1', date: '2024-10-28', time: '09:00', status: 'Confirmed', notes: 'Routine check-up' },
-  { id: '2', patientName: 'Alice Smith', patientId: 'p2', doctorName: 'Dr. Ben Miller', doctorId: 'd2', date: '2024-10-28', time: '11:00', status: 'Pending', notes: 'Follow-up consultation' },
-  { id: '3', patientName: 'Bob Lee', patientId: 'p3', doctorName: 'Dr. Emily Carter', doctorId: 'd1', date: '2024-10-29', time: '14:00', status: 'Confirmed', notes: '' },
-  { id: '4', patientName: 'Sarah Williams', patientId: 'p4', doctorName: 'Dr. Charles Brown', doctorId: 'd3', date: '2024-10-30', time: '10:30', status: 'Cancelled', notes: 'Patient rescheduled' },
-];
-
-const mockDoctors = [
-  { id: 'd1', name: 'Dr. Emily Carter' },
-  { id: 'd2', name: 'Dr. Ben Miller' },
-  { id: 'd3', name: 'Dr. Charles Brown' },
-];
-
-const mockPatients = [
-  { id: 'p1', name: 'John Doe' },
-  { id: 'p2', name: 'Alice Smith' },
-  { id: 'p3', name: 'Bob Lee' },
-  { id: 'p4', name: 'Sarah Williams' },
-];
+import api from '../../services/apiService';
 
 const AppointmentsPage = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
-  const [appointments, setAppointments] = useState(mockAppointmentsData);
+  const [appointments, setAppointments] = useState([]);
+  const [doctors, setDoctors] = useState([]);
+  const [patients, setPatients] = useState([]);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [currentMonthAppointments, setCurrentMonthAppointments] = useState([]);
   const [displayedDate, setDisplayedDate] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  // Filter appointments for the calendar based on displayed month/year
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [appointmentsRes, doctorsRes, patientsRes] = await Promise.all([
+        api.get('/appointments'),
+        api.get('/doctors'),
+        api.get('/patients'),
+      ]);
+      setAppointments(appointmentsRes || []);
+      setDoctors(doctorsRes || []);
+      setPatients(patientsRes || []);
+    } catch (err) {
+      console.error("Error fetching appointments page data:", err);
+      setError(err.message || 'Failed to fetch data');
+      toast({ title: 'Error fetching data', description: err.response?.data?.message || err.message, status: 'error', duration: 5000, isClosable: true });
+    }
+    setLoading(false);
+  }, [toast]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   const updateCalendarAppointments = useCallback((date) => {
     const year = date.getFullYear();
     const month = date.getMonth();
     const filtered = appointments.filter(appt => {
-      const apptDate = new Date(appt.date);
+      if (!appt.appointment_datetime) return false;
+      const apptDate = new Date(appt.appointment_datetime.split('T')[0]);
       return apptDate.getFullYear() === year && apptDate.getMonth() === month;
-    });
+    }).map(appt => ({
+        ...appt,
+        date: appt.appointment_datetime.split('T')[0],
+        time: new Date(appt.appointment_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+        patientName: patients.find(p=>p.id === appt.patient_id)?.full_name || 'N/A',
+        doctorName: doctors.find(d=>d.id === appt.doctor_id)?.full_name || 'N/A',
+    }));
     setCurrentMonthAppointments(filtered);
-  }, [appointments]);
+  }, [appointments, patients, doctors]);
 
   useEffect(() => {
     updateCalendarAppointments(displayedDate);
   }, [displayedDate, updateCalendarAppointments]);
 
   const handleDateClick = (date) => {
-    // For now, just log. Could filter table or open modal for this date.
-    console.log('Date clicked:', date);
-    // Open modal to add appointment for this date
-    setSelectedAppointment(null); // Clear any selected appointment
-    // Pre-fill date in modal if desired by modifying initialData for AppointmentModal
+    setSelectedAppointment({ date: date.toISOString().split('T')[0], time: '' }); // Pre-fill date for new appointment
     onOpen();
   };
 
   const handleAddAppointmentClick = () => {
-    setSelectedAppointment(null);
+    setSelectedAppointment(null); // Clear selection for new appointment
     onOpen();
   };
 
   const handleEditAppointment = (appointment) => {
-    setSelectedAppointment(appointment);
+    const formattedAppointment = {
+        ...appointment,
+        date: appointment.appointment_datetime ? new Date(appointment.appointment_datetime).toISOString().split('T')[0] : '',
+        time: appointment.appointment_datetime ? new Date(appointment.appointment_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
+    };
+    setSelectedAppointment(formattedAppointment);
     onOpen();
   };
 
-  const handleSaveAppointment = (appointmentData) => {
-    // Mock save
-    if (selectedAppointment) {
-      setAppointments(appointments.map(appt => appt.id === selectedAppointment.id ? { ...selectedAppointment, ...appointmentData } : appt));
-      toast({ title: 'Appointment Updated', status: 'success', duration: 3000, isClosable: true });
-    } else {
-      const newAppointment = { ...appointmentData, id: Date.now().toString() }; // Mock ID
-      setAppointments([...appointments, newAppointment]);
-      toast({ title: 'Appointment Booked', status: 'success', duration: 3000, isClosable: true });
+  const handleSaveAppointment = async (appointmentData) => {
+    try {
+      let patientId = appointmentData.patientId;
+      if (!patientId && appointmentData.patientName) {
+        toast({ title: 'Patient Handling', description: 'Selecting an existing patient by ID is required for now. New patient creation via this form is not yet supported.', status: 'info', duration: 5000, isClosable: true });
+        return; 
+      }
+      if (!patientId) {
+        toast({ title: 'Missing Patient', description: 'Please select a patient for the appointment.', status: 'error', duration: 4000, isClosable: true });
+        return;
+      }
+
+      const payload = {
+        patient_id: parseInt(patientId),
+        doctor_id: parseInt(appointmentData.doctorId),
+        appointment_datetime: `${appointmentData.date}T${appointmentData.time}:00`, 
+        status: appointmentData.status || 'Scheduled',
+        notes: appointmentData.notes || '',
+      };
+
+      if (selectedAppointment && selectedAppointment.id) {
+        await api.put(`/appointments/${selectedAppointment.id}`, payload);
+        toast({ title: 'Appointment Updated', status: 'success', duration: 3000, isClosable: true });
+      } else {
+        await api.post('/appointments', payload);
+        toast({ title: 'Appointment Booked', status: 'success', duration: 3000, isClosable: true });
+      }
+      fetchData(); 
+      onClose();
+    } catch (err) {
+      console.error("Error saving appointment:", err);
+      toast({ title: 'Save Failed', description: err.response?.data?.message || err.message || 'Could not save appointment.', status: 'error', duration: 5000, isClosable: true });
     }
-    updateCalendarAppointments(displayedDate); // Re-filter calendar appointments
-    onClose();
   };
 
-  const handleDeleteAppointment = (appointmentId) => {
-    // Mock delete (or change status to Cancelled)
-    setAppointments(appointments.map(appt => appt.id === appointmentId ? { ...appt, status: 'Cancelled' } : appt));
-    toast({ title: 'Appointment Cancelled', status: 'warning', duration: 3000, isClosable: true });
-    updateCalendarAppointments(displayedDate); // Re-filter calendar appointments
+  const handleDeleteAppointment = async (appointmentId) => {
+    try {
+      await api.delete(`/appointments/${appointmentId}`);
+      toast({ title: 'Appointment Deleted', status: 'warning', duration: 3000, isClosable: true });
+      fetchData();
+    } catch (err) {
+      console.error("Error deleting appointment:", err);
+      toast({ title: 'Delete Failed', description: err.response?.data?.message || err.message, status: 'error', duration: 5000, isClosable: true });
+    }
   };
 
   const getStatusColorScheme = (status) => {
     switch (status) {
-      case 'Confirmed': return 'green';
+      case 'Confirmed': case 'Scheduled': return 'green';
       case 'Pending': return 'yellow';
       case 'Cancelled': return 'red';
+      case 'Completed': return 'blue';
       default: return 'gray';
     }
   };
 
-  // Upcoming appointments (e.g., today and future, not cancelled)
   const upcomingAppointments = appointments
-    .filter(appt => new Date(appt.date) >= new Date().setHours(0,0,0,0) && appt.status !== 'Cancelled')
-    .sort((a, b) => new Date(a.date) - new Date(b.date) || a.time.localeCompare(b.time));
+    .filter(appt => appt.appointment_datetime && new Date(appt.appointment_datetime) >= new Date().setHours(0,0,0,0) && appt.status !== 'Cancelled')
+    .sort((a, b) => new Date(a.appointment_datetime) - new Date(b.appointment_datetime));
+
+  if (loading && !appointments.length) return <Box p={4} textAlign="center"><Spinner size="xl" /><Text mt={2}>Loading appointments...</Text></Box>;
+  if (error && !appointments.length) return <Alert status="error" variant="subtle"><AlertIcon />{error}</Alert>;
 
   return (
-    <Box>
-      <Flex justify="space-between" align="center" mb={6}>
+    <Box p={{ base: 2, md: 4 }}>
+      <Flex justify="space-between" align="center" mb={6} direction={{ base: 'column', md: 'row' }} gap={2}>
         <Heading as="h1" size="lg">Appointments</Heading>
-        <Button leftIcon={<FiPlus />} colorScheme="blue" onClick={handleAddAppointmentClick}>
+        <Button leftIcon={<FiPlus />} colorScheme="brand" onClick={handleAddAppointmentClick} alignSelf={{ base: 'stretch', md: 'auto' }}>
           Book Appointment
         </Button>
       </Flex>
@@ -120,10 +162,12 @@ const AppointmentsPage = () => {
         setDisplayedDate={setDisplayedDate}
       />
 
-      <Box mt={8} bg="white" p={6} borderRadius="lg" shadow="card">
+      <Box mt={8} bg="white" p={{base: 3, md:6}} borderRadius="lg" shadow="card" overflowX="auto">
         <Heading as="h2" size="md" mb={4}>Upcoming Appointments</Heading>
-        {upcomingAppointments.length > 0 ? (
-          <Table variant="simple">
+        {loading && appointments.length > 0 && <Box textAlign="center" py={4}><Spinner /></Box>}
+        {!loading && upcomingAppointments.length === 0 && <Text>No upcoming appointments.</Text>}
+        {!loading && upcomingAppointments.length > 0 && (
+          <Table variant="simple" size={{base: "sm", md: "md"}}>
             <Thead>
               <Tr>
                 <Th><Icon as={FiUser} mr={2} />Patient</Th>
@@ -137,13 +181,13 @@ const AppointmentsPage = () => {
             <Tbody>
               {upcomingAppointments.map((appt) => (
                 <Tr key={appt.id}>
-                  <Td>{appt.patientName}</Td>
-                  <Td>{appt.doctorName}</Td>
-                  <Td>{new Date(appt.date).toLocaleDateString()}</Td>
-                  <Td>{appt.time}</Td>
-                  <Td><Tag colorScheme={getStatusColorScheme(appt.status)}>{appt.status}</Tag></Td>
+                  <Td>{patients.find(p => p.id === appt.patient_id)?.full_name || 'N/A'}</Td>
+                  <Td>{doctors.find(d => d.id === appt.doctor_id)?.full_name || 'N/A'}</Td>
+                  <Td>{appt.appointment_datetime ? new Date(appt.appointment_datetime).toLocaleDateString() : 'N/A'}</Td>
+                  <Td>{appt.appointment_datetime ? new Date(appt.appointment_datetime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A'}</Td>
+                  <Td><Tag colorScheme={getStatusColorScheme(appt.status)} size="sm">{appt.status}</Tag></Td>
                   <Td>
-                    <HStack spacing={2}>
+                    <HStack spacing={1}>
                       <IconButton icon={<FiEdit />} aria-label="Edit Appointment" size="sm" variant="ghost" colorScheme="blue" onClick={() => handleEditAppointment(appt)} />
                       {appt.status !== 'Cancelled' && (
                         <IconButton icon={<FiTrash2 />} aria-label="Cancel Appointment" size="sm" variant="ghost" colorScheme="red" onClick={() => handleDeleteAppointment(appt.id)} />
@@ -154,19 +198,17 @@ const AppointmentsPage = () => {
               ))}
             </Tbody>
           </Table>
-        ) : (
-          <Text>No upcoming appointments.</Text>
         )}
       </Box>
 
-      <AppointmentModal
+      {isOpen && <AppointmentModal
         isOpen={isOpen}
         onClose={onClose}
         onSave={handleSaveAppointment}
         initialData={selectedAppointment}
-        doctors={mockDoctors}
-        patients={mockPatients}
-      />
+        doctors={doctors.map(d => ({id: d.id.toString(), name: d.full_name}))} 
+        patients={patients.map(p => ({id: p.id.toString(), name: p.full_name}))}
+      />}
     </Box>
   );
 };

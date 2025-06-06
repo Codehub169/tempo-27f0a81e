@@ -1,174 +1,178 @@
 import React, { useState } from 'react';
 import {
-  Box,
-  Heading,
-  VStack,
-  Text,
-  Select,
-  Button,
-  SimpleGrid,
-  Stat,
-  StatLabel,
-  StatNumber,
-  StatHelpText,
-  StatArrow,
-  useColorModeValue,
-  FormControl,
-  FormLabel,
-  HStack,
-  InputGroup,
-  InputLeftAddon,
-  Input
+  Box, Heading, VStack, Text, Select, Button, SimpleGrid, Stat, StatLabel, StatNumber, StatHelpText, StatArrow,
+  useColorModeValue, FormControl, FormLabel, HStack, Input, Spinner, Alert, AlertIcon, useToast, Icon as ChakraIcon
 } from '@chakra-ui/react';
-import { FiBarChart2, FiDollarSign, FiUsers, FiCalendar } from 'react-icons/fi';
-
-// Mock data - in a real app, this would come from API based on filters
-const mockReportData = {
-  revenue: {
-    currentMonth: 12450,
-    previousMonth: 11800,
-    target: 15000,
-  },
-  appointments: {
-    totalThisMonth: 152,
-    completed: 140,
-    cancelled: 12,
-  },
-  patients: {
-    newThisMonth: 25,
-    totalActive: 350,
-  },
-};
+import { FiBarChart2, FiDollarSign, FiUsers, FiCalendar, FiPackage } from 'react-icons/fi';
+import api from '../../services/apiService';
 
 function ReportsPage() {
-  const [reportType, setReportType] = useState('revenue');
+  const [reportType, setReportType] = useState('');
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [generatedReport, setGeneratedReport] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const cardBg = useColorModeValue('white', 'gray.700');
+  const toast = useToast();
 
-  const handleGenerateReport = () => {
-    // In a real app, fetch data based on reportType and dateRange
-    console.log('Generating report for:', reportType, dateRange);
-    setGeneratedReport(mockReportData); // Use mock data for now
+  const handleGenerateReport = async () => {
+    if (!reportType) {
+      toast({ title: 'Select Report Type', description: 'Please choose a type of report to generate.', status: 'warning', duration: 3000, isClosable: true });
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setGeneratedReport(null);
+    try {
+      const params = {
+        report_type: reportType,
+        start_date: dateRange.start || undefined,
+        end_date: dateRange.end || undefined,
+      };
+      const response = await api.get('/reports/generate', params);
+      setGeneratedReport(response);
+    } catch (err) {
+      const errorMessage = err.response?.data?.message || err.message || 'Failed to generate report';
+      setError(errorMessage);
+      toast({ title: 'Report Generation Failed', description: errorMessage, status: 'error', duration: 5000, isClosable: true });
+    }
+    setLoading(false);
   };
 
   const renderReportContent = () => {
-    if (!generatedReport) {
-      return <Text>Select report type and date range, then click "Generate Report".</Text>;
+    if (loading) return <Spinner size="xl" />;
+    if (error) return <Alert status="error" variant="subtle"><AlertIcon />{error}</Alert>;
+    if (!generatedReport || !generatedReport.data) {
+      return <Text color="gray.500">Select report type and date range, then click "Generate Report". Or no data for selected criteria.</Text>;
     }
 
-    switch (reportType) {
+    const { data, report_type } = generatedReport;
+    const titleCase = (str) => str.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+
+    switch (report_type) {
       case 'revenue':
         return (
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={5}>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel display="flex" alignItems="center"><FiDollarSign style={{marginRight: '8px'}} />Current Month Revenue</StatLabel>
-              <StatNumber>${generatedReport.revenue.currentMonth.toLocaleString()}</StatNumber>
-              <StatHelpText>
-                <StatArrow type={generatedReport.revenue.currentMonth >= generatedReport.revenue.previousMonth ? 'increase' : 'decrease'} />
-                vs Previous Month (${generatedReport.revenue.previousMonth.toLocaleString()})
-              </StatHelpText>
-            </Stat>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel display="flex" alignItems="center"><FiDollarSign style={{marginRight: '8px'}} />Monthly Target</StatLabel>
-              <StatNumber>${generatedReport.revenue.target.toLocaleString()}</StatNumber>
-              <StatHelpText>
-                Progress: {((generatedReport.revenue.currentMonth / generatedReport.revenue.target) * 100).toFixed(1)}%
-              </StatHelpText>
-            </Stat>
+          <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
+            <StatLabel display="flex" alignItems="center"><ChakraIcon as={FiDollarSign} mr={2} />Total Revenue (Paid)</StatLabel>
+            <StatNumber>${parseFloat(data.total_revenue || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</StatNumber>
+            <StatHelpText>For selected period.</StatHelpText>
+          </Stat>
+        );
+      case 'appointments_summary':
+        return (
+          <SimpleGrid columns={{ base: 1, md: 2, lg: 3 }} spacing={5}>
+            {Object.entries(data).map(([key, value]) => {
+              if (key === 'upcoming_appointments_sample') return null; // Handle separately if needed or display differently
+              return (
+                <Stat key={key} p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
+                  <StatLabel display="flex" alignItems="center"><ChakraIcon as={FiCalendar} mr={2} />{titleCase(key)}</StatLabel>
+                  <StatNumber>{typeof value === 'number' ? value.toLocaleString() : value}</StatNumber>
+                </Stat>
+              );
+            })}
           </SimpleGrid>
         );
-      case 'appointments':
+      case 'patient_demographics':
         return (
-          <SimpleGrid columns={{ base: 1, md: 3 }} spacing={5}>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel display="flex" alignItems="center"><FiCalendar style={{marginRight: '8px'}} />Total Appointments (Month)</StatLabel>
-              <StatNumber>{generatedReport.appointments.totalThisMonth}</StatNumber>
-            </Stat>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel>Completed</StatLabel>
-              <StatNumber>{generatedReport.appointments.completed}</StatNumber>
-            </Stat>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel>Cancelled</StatLabel>
-              <StatNumber>{generatedReport.appointments.cancelled}</StatNumber>
-            </Stat>
-          </SimpleGrid>
+          <Box p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
+            <Heading size="md" mb={3} display="flex" alignItems="center"><ChakraIcon as={FiUsers} mr={2} />Patient Demographics</Heading>
+            <Text>Total Patients: {data.total_patients?.toLocaleString() || 'N/A'}</Text>
+            <Text>Average Age: {data.average_age ? parseFloat(data.average_age).toFixed(1) + ' years' : 'N/A'}</Text>
+            {/* Add more demographic details as available from backend */}
+          </Box>
         );
-      case 'patients':
+      case 'inventory_status':
         return (
-          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={5}>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel display="flex" alignItems="center"><FiUsers style={{marginRight: '8px'}} />New Patients (Month)</StatLabel>
-              <StatNumber>{generatedReport.patients.newThisMonth}</StatNumber>
-            </Stat>
-            <Stat p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
-              <StatLabel>Total Active Patients</StatLabel>
-              <StatNumber>{generatedReport.patients.totalActive}</StatNumber>
-            </Stat>
-          </SimpleGrid>
+          <Box p={5} shadow="md" borderWidth="1px" borderRadius="md" bg={cardBg}>
+            <Heading size="md" mb={3} display="flex" alignItems="center"><ChakraIcon as={FiPackage} mr={2} />Inventory Status</Heading>
+            <Text>Total Items: {data.total_items?.toLocaleString() || 'N/A'}</Text>
+            <Text>Items Low in Stock: {data.low_stock_items_count?.toLocaleString() || 'N/A'}</Text>
+            <Text>Most Stocked Item: {data.most_stocked_item?.name || 'N/A'} ({data.most_stocked_item?.quantity_on_hand?.toLocaleString() || 'N/A'})</Text>
+            <Text>Least Stocked Item: {data.least_stocked_item?.name || 'N/A'} ({data.least_stocked_item?.quantity_on_hand?.toLocaleString() || 'N/A'})</Text>
+            {data.low_stock_items_list && data.low_stock_items_list.length > 0 && (
+                <VStack align="start" mt={3} pt={3} borderTopWidth="1px" borderColor="gray.200">
+                    <Text fontWeight="bold">Low Stock Items:</Text>
+                    {data.low_stock_items_list.map(item => 
+                        <Text key={item.id}>- {item.name} (Qty: {item.quantity_on_hand?.toLocaleString()}, Reorder at: {item.reorder_level?.toLocaleString()})</Text>
+                    )}
+                </VStack>
+            )}
+          </Box>
         );
       default:
-        return <Text>Selected report type is not available.</Text>;
+        return <Text>Report type "{report_type}" not recognized or data format is unexpected.</Text>;
     }
   };
 
   return (
-    <Box p={5}>
-      <VStack spacing={6} align="stretch">
-        <Heading as="h1" size="xl">Reports</Heading>
-        
-        <Box p={5} shadow="md" borderWidth="1px" borderRadius="lg" bg={cardBg}>
-            <VStack spacing={4} align="stretch">
-                <Heading as="h3" size="md">Report Filters</Heading>
-                <FormControl id="reportType">
-                    <FormLabel>Report Type</FormLabel>
-                    <Select 
-                        placeholder="Select report type"
-                        value={reportType}
-                        onChange={(e) => setReportType(e.target.value)}
-                    >
-                        <option value="revenue">Revenue Report</option>
-                        <option value="appointments">Appointments Summary</option>
-                        <option value="patients">Patient Statistics</option>
-                        {/* <option value="inventory">Inventory Levels</option> */}
-                    </Select>
-                </FormControl>
-                <HStack spacing={4}>
-                    <FormControl id="startDate">
-                        <FormLabel>Start Date</FormLabel>
-                        <Input 
-                            type="date" 
-                            value={dateRange.start}
-                            onChange={(e) => setDateRange(prev => ({...prev, start: e.target.value}))}
-                        />
-                    </FormControl>
-                    <FormControl id="endDate">
-                        <FormLabel>End Date</FormLabel>
-                        <Input 
-                            type="date" 
-                            value={dateRange.end}
-                            onChange={(e) => setDateRange(prev => ({...prev, end: e.target.value}))}
-                        />
-                    </FormControl>
-                </HStack>
-                <Button 
-                    leftIcon={<FiBarChart2 />} 
-                    colorScheme="blue" 
-                    onClick={handleGenerateReport}
-                    alignSelf="flex-start"
-                >
-                    Generate Report
-                </Button>
-            </VStack>
-        </Box>
+    <Box p={{ base: 4, md: 6 }}>
+      <Heading as="h1" size="lg" mb={6} color="brand.700" fontFamily="heading">Reports & Analytics</Heading>
 
-        <Box mt={8}>
-          <Heading as="h2" size="lg" mb={4}>Report Results</Heading>
+      <VStack spacing={6} align="stretch" bg={cardBg} p={6} borderRadius="lg" shadow="card" mb={8}>
+        <FormControl>
+          <FormLabel htmlFor="reportType">Report Type</FormLabel>
+          <Select 
+            id="reportType" 
+            placeholder="Select report type" 
+            value={reportType} 
+            onChange={(e) => setReportType(e.target.value)}
+            focusBorderColor="brand.500"
+          >
+            <option value="revenue">Revenue Report</option>
+            <option value="appointments_summary">Appointments Summary</option>
+            <option value="patient_demographics">Patient Demographics</option>
+            <option value="inventory_status">Inventory Status</option>
+          </Select>
+        </FormControl>
+
+        <HStack spacing={4} direction={{ base: 'column', md: 'row' }} align="flex-end">
+          <FormControl>
+            <FormLabel htmlFor="startDate">Start Date (Optional)</FormLabel>
+            <Input 
+              id="startDate" 
+              type="date" 
+              value={dateRange.start} 
+              onChange={(e) => setDateRange({ ...dateRange, start: e.target.value })}
+              focusBorderColor="brand.500"
+              max={dateRange.end || undefined} // Prevent start date after end date
+            />
+          </FormControl>
+          <FormControl>
+            <FormLabel htmlFor="endDate">End Date (Optional)</FormLabel>
+            <Input 
+              id="endDate" 
+              type="date" 
+              value={dateRange.end} 
+              onChange={(e) => setDateRange({ ...dateRange, end: e.target.value })}
+              focusBorderColor="brand.500"
+              min={dateRange.start || undefined} // Prevent end date before start date
+            />
+          </FormControl>
+        </HStack>
+
+        <Button 
+          leftIcon={<ChakraIcon as={FiBarChart2} />}
+          colorScheme="brand" 
+          onClick={handleGenerateReport}
+          isLoading={loading}
+          loadingText="Generating..."
+          alignSelf={{ base: "stretch", md: "flex-start" }}
+        >
+          Generate Report
+        </Button>
+      </VStack>
+
+      {(generatedReport || loading || error) && (
+        <Box mt={8} p={6} bg={cardBg} borderRadius="lg" shadow="card">
+          {generatedReport && <Heading as="h2" size="md" mb={4} color="brand.600">Generated Report: {generatedReport.report_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</Heading>}
           {renderReportContent()}
         </Box>
-
-      </VStack>
+      )}
+      {!generatedReport && !loading && !error && (
+         <Box mt={8} p={6} bg={cardBg} borderRadius="lg" shadow="card" textAlign="center">
+            <Text color="gray.500">Your generated report will appear here.</Text>
+        </Box>
+      )}
     </Box>
   );
 }
