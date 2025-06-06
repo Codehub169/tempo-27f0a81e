@@ -1,69 +1,92 @@
 import React from 'react';
-import { Flex, Heading, Avatar, Text, IconButton, Box, Menu, MenuButton, MenuList, MenuItem, Icon as ChakraIcon } from '@chakra-ui/react'; // Renamed Icon to ChakraIcon to avoid conflict
-import { FiMenu, FiChevronDown } from 'react-icons/fi';
-import { useAuth } from '../../contexts/AuthContext'; // Assuming AuthContext is in this path
-import { useNavigate } from 'react-router-dom';
+import {
+  Flex,
+  IconButton,
+  Text,
+  Box,
+  Avatar,
+  Menu,
+  MenuButton,
+  MenuList,
+  MenuItem,
+  Heading
+} from '@chakra-ui/react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
+import { HamburgerIcon, BellIcon, ChevronDownIcon } from '@chakra-ui/icons';
+import { useAuth } from '../../contexts/AuthContext';
 
-// Header component receives pageTitle and onOpen (for mobile sidebar) as props
-const Header = ({ pageTitle, onOpenMobileNav }) => {
-  const { user, logout } = useAuth(); // Assuming user object { name, avatarUrl } is provided by AuthContext
+const Header = ({ pageTitle, onOpenDrawer, isMobile }) => {
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-
-  // Placeholder user data if not available from context, matching mockup
-  const displayName = user?.name || 'Dr. Emily Carter';
-  const avatarUrl = user?.avatarUrl || 'https://i.pravatar.cc/40?u=admin';
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
 
+  const userName = user?.name || 'User Name';
+  const userAvatarSrc = user?.avatarUrl || ''; 
+
   return (
     <Flex
       as="header"
       align="center"
       justify="space-between"
-      p={{ base: '15px', md: '0' }} // Padding for mobile, 0 for desktop as MainLayout will handle it
-      borderBottomWidth={{ base: '1px', md: '0' }} // Border for mobile, 0 for desktop
-      borderColor="border"
-      bg={{ base: 'white', md: 'transparent'}}
       w="full"
+      px={{ base: "2", md: "4" }}
+      py="2"
+      bg="white"
+      borderBottomWidth="1px"
+      borderColor="gray.200"
+      h="60px" 
+      position="sticky"
+      top="0"
+      zIndex="banner" 
     >
-      {/* Mobile Navigation Toggle - Hidden on md and up */}
-      <IconButton
-        aria-label="Open menu"
-        icon={<FiMenu />}
-        onClick={onOpenMobileNav} // This prop should be connected to MainLayout's drawer disclosure
-        display={{ base: 'flex', md: 'none' }}
-        variant="outline"
-        mr={3}
-      />
+      <Flex align="center">
+        {isMobile && (
+          <IconButton
+            icon={<HamburgerIcon w={5} h={5} />}
+            onClick={onOpenDrawer} 
+            aria-label="Open menu"
+            variant="ghost"
+            mr="2"
+          />
+        )}
+        <Heading as="h1" size="md" fontWeight="semibold" color="gray.700" noOfLines={1}>
+          {pageTitle}
+        </Heading>
+      </Flex>
 
-      {/* Page Title */}
-      <Heading as="h2" size="lg" fontFamily="secondary" color="text.primary" fontWeight="semibold" flexGrow={1} textAlign={{ base: 'center', md: 'left'}}>
-        {pageTitle || 'Dashboard'}
-      </Heading>
-
-      <Box ml={{base: 2, md: "auto"}}> {/* Pushes user profile to the right */}
+      <Flex align="center">
+        <IconButton
+          icon={<BellIcon w={6} h={6} />} 
+          variant="ghost"
+          aria-label="Notifications"
+          mr={{ base: "1", md: "3" }}
+          color="gray.600"
+        />
         <Menu>
-          <MenuButton
-            as={Flex}
-            alignItems="center"
-            cursor="pointer"
-            p={2}
-            borderRadius="md"
-            _hover={{ bg: 'neutral.lightGray' }}
+          <MenuButton 
+            as={Box} 
+            cursor="pointer" 
+            p={{ base: 1, md: 2}} 
+            borderRadius="md" 
+            _hover={{ bg: "gray.100"}}
           >
-            <Avatar size="sm" name={displayName} src={avatarUrl} mr="10px" />
-            <Text fontWeight="medium" display={{ base: 'none', md: 'block' }}>{displayName}</Text>
-            <ChakraIcon as={FiChevronDown} ml={1} display={{ base: 'none', md: 'block' }} />
+            <Flex align="center">
+              <Avatar size="sm" name={userName} src={userAvatarSrc} />
+              {!isMobile && <Text fontSize="sm" ml="2" mr="1" fontWeight="medium" color="gray.700">{userName}</Text>}
+              {!isMobile && <ChevronDownIcon color="gray.600"/>}
+            </Flex>
           </MenuButton>
           <MenuList>
-            <MenuItem onClick={() => navigate('/settings')}>Settings</MenuItem>
+            <MenuItem as={RouterLink} to="/profile">Profile</MenuItem> 
+            <MenuItem as={RouterLink} to="/settings">Settings</MenuItem>
             <MenuItem onClick={handleLogout}>Logout</MenuItem>
           </MenuList>
         </Menu>
-      </Box>
+      </Flex>
     </Flex>
   );
 };

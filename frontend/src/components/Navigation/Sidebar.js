@@ -1,118 +1,110 @@
 import React from 'react';
-import { Box, VStack, Text, Image, Flex, Heading, Link as ChakraLink, Icon } from '@chakra-ui/react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { FiHome, FiCalendar, FiUsers, FiHeart, FiArchive, FiFileText, FiPieChart, FiSettings, FiLogOut } from 'react-icons/fi';
-import { useAuth } from '../../contexts/AuthContext'; // Assuming AuthContext is in this path
-import EyeLogo from '../../assets/eye-logo.svg';
+import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
+import { Box, VStack, Link, Text, Icon, Divider, Heading } from '@chakra-ui/react';
+import { FaTachometerAlt, FaUserMd, FaCalendarCheck, FaCog, FaSignOutAlt, FaFileInvoice, FaUsers } from 'react-icons/fa'; // Added FaUsers
+import { useAuth } from '../../contexts/AuthContext'; 
 
 const navItems = [
-  { label: 'Dashboard', path: '/dashboard', icon: FiHome },
-  { label: 'Appointments', path: '/appointments', icon: FiCalendar },
-  { label: 'Patients', path: '/patients', icon: FiUsers },
-  { label: 'Doctors', path: '/doctors', icon: FiHeart }, // FiHeart as a placeholder for doctor/stethoscope
-  { label: 'Inventory', path: '/inventory', icon: FiArchive },
-  { label: 'Billing', path: '/billing', icon: FiFileText },
-  { label: 'Reports', path: '/reports', icon: FiPieChart },
+  { label: 'Dashboard', path: '/dashboard', icon: FaTachometerAlt }, 
+  { label: 'Appointments', path: '/appointments', icon: FaCalendarCheck },
+  { label: 'Doctors', path: '/doctors', icon: FaUserMd }, 
+  { label: 'Patients', path: '/patients', icon: FaUsers }, // Added Patients link
+  { label: 'Invoices', path: '/invoices', icon: FaFileInvoice },
+  // Add more primary navigation items here
 ];
 
-const Sidebar = () => {
-  const { logout } = useAuth();
+const Sidebar = ({ onCloseDrawer }) => {
+  const location = useLocation();
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const handleLogout = () => {
     logout();
     navigate('/login');
+    if (onCloseDrawer) {
+      onCloseDrawer();
+    }
   };
 
-  const activeLinkStyle = {
-    backgroundColor: 'gray.700', // Corresponds to #495057 from mockup
-    color: 'white',
+  const secondaryNavItems = [
+    { label: 'Settings', path: '/settings', icon: FaCog },
+    { label: 'Logout', icon: FaSignOutAlt, action: handleLogout },
+  ];
+
+  const handleLinkClick = (itemAction) => {
+    if (itemAction) {
+      itemAction(); 
+    } 
+    if (onCloseDrawer) {
+      onCloseDrawer();
+    }
+  };
+
+  const renderNavItem = (item) => {
+    const isActive = !item.action && location.pathname === item.path;
+    
+    const linkProps = {
+      key: item.label,
+      display: "flex",
+      alignItems: "center",
+      p: "3",
+      borderRadius: "md",
+      role: "group",
+      color: isActive ? 'white' : 'gray.700',
+      bg: isActive ? 'primary.500' : 'transparent',
+      _hover: {
+        textDecoration: 'none',
+        bg: isActive ? 'primary.600' : 'gray.100',
+        color: isActive ? 'white' : 'gray.900',
+      },
+    };
+
+    if (item.action) {
+      linkProps.onClick = () => handleLinkClick(item.action);
+      linkProps.cursor = "pointer";
+    } else {
+      linkProps.as = RouterLink;
+      linkProps.to = item.path;
+      linkProps.onClick = () => handleLinkClick(null); 
+    }
+
+    return (
+      <Link {...linkProps}>
+        {item.icon && (
+          <Icon 
+            as={item.icon} 
+            mr="3" 
+            boxSize="5" 
+            color={isActive ? 'white' : 'gray.500'} 
+            _groupHover={{color: isActive ? 'white' : 'gray.700'}}
+          />
+        )}
+        <Text fontWeight="medium">{item.label}</Text>
+      </Link>
+    );
   };
 
   return (
     <Box
-      as="aside"
-      w={{ base: 'full', md: '260px' }} // Responsive width
-      bg="neutral.darkGray" // Using theme color: neutral.darkGray (#343A40)
-      color="neutral.lightGray" // Using theme color for text
-      p="20px"
+      bg="white"
+      w="full"
+      h="full"
       display="flex"
       flexDirection="column"
-      position="fixed"
-      top="0"
-      left="0"
-      bottom="0"
-      zIndex="1000"
     >
-      <Flex align="center" pb="30px" borderBottom="1px solid" borderColor="gray.700" mb="20px">
-        <Image src={EyeLogo} alt="EyeClinic Logo" boxSize="36px" mr="12px" />
-        <Heading as="h1" size="md" color="white" fontFamily="secondary">
-          EyeClinic
+      <Box p="4">
+        <Heading size="md" mb="6" textAlign="center" color="primary.500">
+            Eye Clinic
         </Heading>
-      </Flex>
+      </Box>
 
-      <VStack as="nav" spacing="8px" align="stretch" flexGrow={1}>
-        {navItems.map((item) => (
-          <ChakraLink
-            key={item.label}
-            as={NavLink}
-            to={item.path}
-            display="flex"
-            alignItems="center"
-            p="12px 15px"
-            color="gray.400" // Corresponds to #adb5bd
-            borderRadius="md" // 6px
-            fontWeight="medium"
-            _hover={{
-              bg: 'gray.700',
-              color: 'white',
-            }}
-            _activeLink={activeLinkStyle}
-            style={({ isActive }) => (isActive ? activeLinkStyle : undefined)}
-          >
-            <Icon as={item.icon} boxSize="20px" mr="12px" />
-            {item.label}
-          </ChakraLink>
-        ))}
+      <VStack spacing="2" align="stretch" p="4" flexGrow={1} overflowY="auto">
+        {navItems.map((item) => renderNavItem(item))}
       </VStack>
 
-      <VStack as="nav" spacing="8px" align="stretch" pt="20px" borderTop="1px solid" borderColor="gray.700">
-        <ChakraLink
-          as={NavLink}
-          to="/settings"
-          display="flex"
-          alignItems="center"
-          p="12px 15px"
-          color="gray.400"
-          borderRadius="md"
-          fontWeight="medium"
-          _hover={{
-            bg: 'gray.700',
-            color: 'white',
-          }}
-          _activeLink={activeLinkStyle}
-          style={({ isActive }) => (isActive ? activeLinkStyle : undefined)}
-        >
-          <Icon as={FiSettings} boxSize="20px" mr="12px" />
-          Settings
-        </ChakraLink>
-        <ChakraLink
-          onClick={handleLogout}
-          display="flex"
-          alignItems="center"
-          p="12px 15px"
-          color="gray.400"
-          borderRadius="md"
-          fontWeight="medium"
-          cursor="pointer"
-          _hover={{
-            bg: 'gray.700',
-            color: 'white',
-          }}
-        >
-          <Icon as={FiLogOut} boxSize="20px" mr="12px" />
-          Logout
-        </ChakraLink>
+      <Divider />
+      <VStack spacing="2" align="stretch" p="4">
+        {secondaryNavItems.map((item) => renderNavItem(item))}
       </VStack>
     </Box>
   );
