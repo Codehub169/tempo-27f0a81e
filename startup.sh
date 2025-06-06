@@ -34,6 +34,19 @@ echo ""
 echo "--- Backend Setup ---"
 cd backend
 
+# Create a default .env file if it doesn't exist, configured for development
+if [ ! -f ".env" ]; then
+  echo "INFO: .env file not found. Creating a default .env file for development."
+  cat << EOF > .env
+FLASK_APP=run.py
+FLASK_ENV=development
+SECRET_KEY='your_super_secret_key_for_flask_sessions_and_csrf'
+JWT_SECRET_KEY='your_super_secret_key_for_jwt_signing'
+DATABASE_URL='sqlite:///instance/clinic.db'
+CORS_ORIGINS='*'
+EOF
+fi
+
 VENV_DIR=".venv"
 # Ensure python3 is available
 if ! command -v python3 &> /dev/null
@@ -72,6 +85,8 @@ echo "Applying database migrations..."
 
 # Ensure instance directory exists for SQLite, as Flask-Migrate/SQLAlchemy might need it
 # The instance folder is typically at the same level as the 'app' package, inside 'backend'
+# Python code in config.py and app/__init__.py also handles instance folder creation,
+# but this ensures it exists before flask db commands are run.
 if [ ! -d "instance" ]; then
     echo "Creating instance directory for database..."
     mkdir -p instance
@@ -110,7 +125,7 @@ echo "Starting backend Flask server..."
 # FLASK_RUN_PORT is used by run.py. Setting it here ensures it uses 9000 if not overridden elsewhere.
 export FLASK_RUN_PORT=9000 
 # FLASK_ENV is typically set in .env; ensure it's 'development' or 'production' as needed.
-# Example: export FLASK_ENV=development (though run.py also handles default)
+# Example: export FLASK_ENV=development (though run.py also handles default if .env is missing or FLASK_ENV is not in it)
 echo "Backend will run on host 0.0.0.0, port $FLASK_RUN_PORT (check run.py output for actual effective settings)"
 "$PYTHON_EXEC" run.py
 
