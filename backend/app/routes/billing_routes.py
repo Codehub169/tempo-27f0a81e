@@ -1,85 +1,107 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required
 from http import HTTPStatus
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import datetime
 
-from app import db
+from app.database import db # Corrected: Use db from app.database
 from app.models import Bill, BillItem, Patient, InventoryItem
 from app.schemas import BillSchema, BillItemSchema
+from marshmallow import ValidationError
 
 billing_bp = Blueprint('billing_bp', __name__, url_prefix='/bills')
 
 bill_schema = BillSchema()
 bills_schema = BillSchema(many=True)
-bill_item_schema = BillItemSchema()
+bill_item_schema = BillItemSchema() # Used for validating individual items
 
 @billing_bp.route('', methods=['POST'])
 @jwt_required()
 def create_bill():
     data = request.get_json()
+    if not data:
+        return jsonify({'message': 'No input data provided'}), HTTPStatus.BAD_REQUEST
     
-    # Validate patient exists
     patient_id = data.get('patient_id')
     if not patient_id or not Patient.query.get(patient_id):
         return jsonify({'message': 'Patient not found'}), HTTPStatus.NOT_FOUND
 
-    # Basic validation for bill items structure
-    if 'bill_items' not in data or not isinstance(data['bill_items'], list):
-        return jsonify({'message': 'bill_items must be a list'}), HTTPStatus.BAD_REQUEST
+    if 'bill_items' not in data or not isinstance(data['bill_items'], list) or not data['bill_items']:
+        return jsonify({'message': 'bill_items must be a non-empty list'}), HTTPStatus.BAD_REQUEST
 
-    errors = bill_schema.validate(data)
-    if errors:
-        return jsonify(errors), HTTPStatus.BAD_REQUEST
+    # Validate the overall bill structure (excluding items initially for separate processing)
+    bill_payload_for_schema = {k: v for k, v in data.items() if k != 'bill_items'}
+    try:
+        # Marshmallow validates and deserializes. load() returns dict for model creation.
+        loaded_bill_data = bill_schema.load(bill_payload_for_schema) 
+    except ValidationError as err:
+        return jsonify(err.messages), HTTPStatus.BAD_REQUEST
 
+    new_bill_model = Bill(**loaded_bill_data) # Create Bill model instance
+    
     total_amount = Decimal('0.00')
-    bill_items_data = data.pop('bill_items', []) # Remove items for separate processing
-    
-    new_bill = bill_schema.load(data) # Load main bill data (patient_id, bill_date, etc.)
-    
-    processed_bill_items = []
+    processed_bill_item_models = []
 
     try:
-        for item_data in bill_items_data:
-            item_errors = bill_item_schema.validate(item_data)
-            if item_errors:
-                raise ValueError(f"Invalid bill item data: {item_errors}")
+        for item_data_from_payload in data['bill_items']:
+            try:
+                loaded_item_data = bill_item_schema.load(item_data_from_payload)
+            except ValidationError as item_err:
+                db.session.rollback() # Rollback any DB changes from this attempt (e.g. previous inventory adjustments)
+                return jsonify({'message': f'Invalid bill item data for item {data["bill_items"].index(item_data_from_payload) + 1}: {item_err.messages}'}), HTTPStatus.BAD_REQUEST
 
-            # Check inventory and update quantity if inventory_item_id is present
-            inventory_item_id = item_data.get('inventory_item_id')
-            quantity = Decimal(str(item_data.get('quantity', 1)))
-            
-            if inventory_item_id:
-                inventory_item = InventoryItem.query.get(inventory_item_id)
-                if not inventory_item:
-                    raise ValueError(f"Inventory item with ID {inventory_item_id} not found.")
-                if inventory_item.quantity_on_hand < quantity:
-                    raise ValueError(f"Not enough stock for item '{inventory_item.name}'. Available: {inventory_item.quantity_on_hand}")
-                inventory_item.quantity_on_hand -= quantity
-                item_data['unit_price'] = str(inventory_item.unit_price) # Use inventory item's price
-            
-            # Ensure unit_price is a string for Decimal conversion in schema
-            item_data['unit_price'] = str(item_data.get('unit_price', '0.00'))
-            
-            # Create BillItem instance
-            bill_item_instance = bill_item_schema.load(item_data)
-            bill_item_instance.sub_total = bill_item_instance.quantity * bill_item_instance.unit_price
-            total_amount += bill_item_instance.sub_total
-            processed_bill_items.append(bill_item_instance)
+            quantity = loaded_item_data.get('quantity', 1) # Schema ensures int, default 1
+            # unit_price comes from schema load as Decimal if as_string=False, or string if as_string=True
+            # Assuming schema's Decimal field (as_string=True) loads as string, convert to Decimal here.
+            # Or better, ensure schema loads it as Decimal.
+            # For now, let's assume loaded_item_data['unit_price'] is a string due to schema's as_string=True.
+            try:
+                unit_price = Decimal(str(loaded_item_data.get('unit_price', '0.00')))
+            except InvalidOperation:
+                 db.session.rollback()
+                 return jsonify({'message': f'Invalid unit_price format for item.'}), HTTPStatus.BAD_REQUEST
 
-        new_bill.total_amount = total_amount
-        new_bill.bill_items = processed_bill_items # Associate items with the bill
+            inventory_item_model = None
+            if loaded_item_data.get('inventory_item_id'):
+                inventory_item_model = InventoryItem.query.get(loaded_item_data['inventory_item_id'])
+                if not inventory_item_model:
+                    raise ValueError(f"Inventory item with ID {loaded_item_data['inventory_item_id']} not found.")
+                if inventory_item_model.quantity_on_hand < quantity:
+                    raise ValueError(f"Not enough stock for item '{inventory_item_model.name}'. Available: {inventory_item_model.quantity_on_hand}")
+                
+                inventory_item_model.quantity_on_hand -= quantity # Decrease stock
+                unit_price = inventory_item_model.unit_price # Use inventory item's current price (already Decimal)
+                loaded_item_data['unit_price'] = unit_price # Update for model creation
+            
+            # Create BillItem model instance using the validated and processed data
+            # Ensure loaded_item_data keys match BillItem model fields or schema fields for **kwargs
+            # Explicitly create BillItem to avoid issues with extra keys from schema load if any
+            bill_item_model_instance = BillItem(
+                inventory_item_id=loaded_item_data.get('inventory_item_id'),
+                service_description=loaded_item_data.get('service_description'),
+                quantity=quantity,
+                unit_price=unit_price # unit_price is now Decimal
+            )
+            bill_item_model_instance.sub_total = bill_item_model_instance.quantity * bill_item_model_instance.unit_price
+            total_amount += bill_item_model_instance.sub_total
+            processed_bill_item_models.append(bill_item_model_instance)
 
-        db.session.add(new_bill)
+        new_bill_model.total_amount = total_amount
+        new_bill_model.bill_items = processed_bill_item_models # Assign child objects to parent for relationship
+
+        db.session.add(new_bill_model)
+        # All inventory items that were modified are already part of the session 
+        # and their quantity_on_hand changes will be committed.
         db.session.commit()
-        return jsonify(bill_schema.dump(new_bill)), HTTPStatus.CREATED
+        return jsonify(bill_schema.dump(new_bill_model)), HTTPStatus.CREATED
 
-    except ValueError as ve:
-        db.session.rollback()
+    except ValueError as ve: # Catch custom ValueErrors for stock, item not found etc.
+        db.session.rollback() 
         return jsonify({'message': str(ve)}), HTTPStatus.BAD_REQUEST
     except Exception as e:
         db.session.rollback()
-        return jsonify({'message': 'Error creating bill', 'error': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+        return jsonify({'message': 'Error processing bill creation', 'error': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
+
 
 @billing_bp.route('', methods=['GET'])
 @jwt_required()
@@ -120,27 +142,34 @@ def get_bill(bill_id):
 @billing_bp.route('/<int:bill_id>', methods=['PUT'])
 @jwt_required()
 def update_bill(bill_id):
-    bill = Bill.query.get_or_404(bill_id)
+    bill_model = Bill.query.get_or_404(bill_id)
     data = request.get_json()
+    if not data:
+        return jsonify({'message': 'No input data provided'}), HTTPStatus.BAD_REQUEST
 
-    # For MVP, only allow updating payment_status and notes. Item modification is complex.
-    allowed_updates = {}
+    allowed_update_fields_payload = {}
     if 'payment_status' in data:
-        allowed_updates['payment_status'] = data['payment_status']
-    if 'notes' in data: # Assuming Bill model might have notes, or schema supports it
-        allowed_updates['notes'] = data['notes']
+        allowed_update_fields_payload['payment_status'] = data['payment_status']
+    if 'notes' in data:
+        allowed_update_fields_payload['notes'] = data['notes']
     
-    if not allowed_updates:
-        return jsonify({'message': 'No updatable fields provided (payment_status, notes)'}), HTTPStatus.BAD_REQUEST
-
-    errors = bill_schema.validate(allowed_updates, partial=True)
-    if errors:
-        return jsonify(errors), HTTPStatus.BAD_REQUEST
+    if not allowed_update_fields_payload:
+        return jsonify({'message': 'No updatable fields provided (only payment_status, notes allowed for now)'}), HTTPStatus.BAD_REQUEST
 
     try:
-        updated_bill = bill_schema.load(allowed_updates, instance=bill, partial=True)
+        # Validate and load only the allowed fields
+        # partial=True ensures other fields are not required
+        loaded_data = bill_schema.load(allowed_update_fields_payload, partial=True)
+        
+        # Apply updated fields to the SQLAlchemy model instance
+        for key, value in loaded_data.items():
+            setattr(bill_model, key, value)
+        
+        db.session.add(bill_model) # Add to session for safety
         db.session.commit()
-        return jsonify(bill_schema.dump(updated_bill)), HTTPStatus.OK
+        return jsonify(bill_schema.dump(bill_model)), HTTPStatus.OK
+    except ValidationError as err:
+        return jsonify(err.messages), HTTPStatus.BAD_REQUEST
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': 'Error updating bill', 'error': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
@@ -148,14 +177,14 @@ def update_bill(bill_id):
 @billing_bp.route('/<int:bill_id>', methods=['DELETE'])
 @jwt_required()
 def delete_bill(bill_id):
-    # In a real system, bills are usually voided or cancelled, not hard deleted.
-    # For MVP, we can implement a soft delete (e.g., change status to 'Voided') or hard delete with caution.
     bill = Bill.query.get_or_404(bill_id)
     try:
-        # Before deleting, revert inventory stock for associated bill items
-        for item in bill.bill_items:
-            if item.inventory_item_id and item.inventory_item:
-                item.inventory_item.quantity_on_hand += item.quantity
+        # Atomically update inventory and delete bill
+        for item_model in bill.bill_items:
+            if item_model.inventory_item_id and item_model.inventory_item:
+                # Ensure inventory_item is loaded if it's a lazy relationship and session might be tricky
+                # db.session.add(item_model.inventory_item) # Not strictly needed if already in session
+                item_model.inventory_item.quantity_on_hand += item_model.quantity
         
         db.session.delete(bill)
         db.session.commit()

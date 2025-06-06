@@ -1,20 +1,16 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required
 from http import HTTPStatus
 
-from app import db
-from app.models import InventoryItem, User
+from app.database import db # Corrected: Use db from app.database
+from app.models import InventoryItem
 from app.schemas import InventoryItemSchema
+from app.utils import is_admin # Import is_admin from utils
 
 inventory_bp = Blueprint('inventory_bp', __name__, url_prefix='/inventory')
 
 inventory_item_schema = InventoryItemSchema()
 inventory_items_schema = InventoryItemSchema(many=True)
-
-def is_admin():
-    user_id = get_jwt_identity()
-    user = User.query.get(user_id)
-    return user and user.role == 'admin'
 
 @inventory_bp.route('', methods=['POST'])
 @jwt_required()
@@ -23,15 +19,23 @@ def create_inventory_item():
         return jsonify({'message': 'Admin access required'}), HTTPStatus.FORBIDDEN
 
     data = request.get_json()
-    errors = inventory_item_schema.validate(data)
-    if errors:
-        return jsonify(errors), HTTPStatus.BAD_REQUEST
+    if not data:
+        return jsonify({'message': 'No input data provided'}), HTTPStatus.BAD_REQUEST
+    
+    # Validate with schema first to catch structural issues
+    validation_errors = inventory_item_schema.validate(data)
+    if validation_errors:
+        return jsonify(validation_errors), HTTPStatus.BAD_REQUEST
 
     try:
-        new_item = inventory_item_schema.load(data)
-        db.session.add(new_item)
+        # Load data using schema, which returns a dictionary
+        loaded_data = inventory_item_schema.load(data)
+        # Create SQLAlchemy model instance from the dictionary
+        new_item_model = InventoryItem(**loaded_data)
+        
+        db.session.add(new_item_model)
         db.session.commit()
-        return jsonify(inventory_item_schema.dump(new_item)), HTTPStatus.CREATED
+        return jsonify(inventory_item_schema.dump(new_item_model)), HTTPStatus.CREATED
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': 'Error creating inventory item', 'error': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
@@ -65,16 +69,29 @@ def update_inventory_item(item_id):
     if not is_admin():
         return jsonify({'message': 'Admin access required'}), HTTPStatus.FORBIDDEN
 
-    item = InventoryItem.query.get_or_404(item_id)
+    item_model = InventoryItem.query.get_or_404(item_id)
     data = request.get_json()
-    errors = inventory_item_schema.validate(data, partial=True)
-    if errors:
-        return jsonify(errors), HTTPStatus.BAD_REQUEST
+    if not data:
+        return jsonify({'message': 'No input data provided'}), HTTPStatus.BAD_REQUEST
+    
+    # Validate with schema first, partial=True for updates
+    validation_errors = inventory_item_schema.validate(data, partial=True)
+    if validation_errors:
+        return jsonify(validation_errors), HTTPStatus.BAD_REQUEST
 
     try:
-        updated_item = inventory_item_schema.load(data, instance=item, partial=True)
+        # Load data using schema (partial=True), returns a dictionary of fields to update
+        # Marshmallow's load method can update an existing model instance directly if `instance` argument is provided
+        # However, the current approach of setattr is also fine and explicit.
+        data_to_update = inventory_item_schema.load(data, partial=True)
+        
+        # Apply updated fields to the SQLAlchemy model instance
+        for key, value in data_to_update.items():
+            setattr(item_model, key, value)
+        
+        db.session.add(item_model) # Add to session in case it was detached or for safety
         db.session.commit()
-        return jsonify(inventory_item_schema.dump(updated_item)), HTTPStatus.OK
+        return jsonify(inventory_item_schema.dump(item_model)), HTTPStatus.OK
     except Exception as e:
         db.session.rollback()
         return jsonify({'message': 'Error updating inventory item', 'error': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
@@ -92,4 +109,10 @@ def delete_inventory_item(item_id):
         return '', HTTPStatus.NO_CONTENT
     except Exception as e: # Catch potential integrity errors if item is in use
         db.session.rollback()
-        return jsonify({'message': 'Error deleting inventory item. It might be associated with existing bills.', 'error': str(e)}), HTTPStatus.CONFLICT
+        # Check if the error is due to foreign key constraint (SQLite and PostgreSQL syntax)
+        error_str = str(e).lower()
+        if 'foreign key constraint failed' in error_str or \
+           'violates foreign key constraint' in error_str or \
+           'constraint failed' in error_str: # More generic for SQLite
+             return jsonify({'message': 'Error deleting inventory item. It might be associated with existing bills or other records.', 'error': str(e)}), HTTPStatus.CONFLICT
+        return jsonify({'message': 'Error deleting inventory item', 'error': str(e)}), HTTPStatus.INTERNAL_SERVER_ERROR
