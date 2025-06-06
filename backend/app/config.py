@@ -2,7 +2,8 @@ import os
 from datetime import timedelta
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-INSTANCE_FOLDER_PATH = os.path.join(BASE_DIR, '..', 'instance')
+# INSTANCE_FOLDER_PATH is relative to this file's directory (app), going up one level (to backend) and then into 'instance'
+INSTANCE_FOLDER_PATH = os.path.join(BASE_DIR, '..', 'instance') # Resolves to backend/instance
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'a_very_secret_key_that_should_be_changed'
@@ -13,25 +14,31 @@ class Config:
     CORS_ORIGINS = os.environ.get('CORS_ORIGINS', '*') # Default to all origins for development convenience
 
     # Ensure the instance folder exists. This code runs when the Config class is defined (module import time).
+    # Flask's app.instance_path will also point to backend/instance if the app root is 'backend'
+    # and instance_relative_config=True is used.
     if not os.path.exists(INSTANCE_FOLDER_PATH):
         try:
             os.makedirs(INSTANCE_FOLDER_PATH, exist_ok=True)
             print(f"INFO: Config: Created instance folder at {INSTANCE_FOLDER_PATH}")
         except OSError as e:
-            print(f"CRITICAL: Config: Could not create instance folder at {INSTANCE_FOLDER_PATH}: {e}. SQLite database operations will likely fail.")
+            print(f"CRITICAL: Config: Could not create instance folder at {INSTANCE_FOLDER_PATH}: {e}. Default SQLite database operations will likely fail.")
+            # Raising error here to fail fast, consistent with app/__init__.py's instance_path creation check.
             raise OSError(f"Failed to create critical instance folder {INSTANCE_FOLDER_PATH}: {e}") from e
 
-    # Simplified URI determination
-    # If DATABASE_URL is provided, use it. Otherwise, use a relative SQLite path
-    # which Flask-SQLAlchemy will resolve relative to the instance folder.
+    # Simplified SQLALCHEMY_DATABASE_URI determination.
+    # If DATABASE_URL is provided, use it. Otherwise, use a relative SQLite path (e.g., 'sqlite:///clinic.db'),
+    # which Flask-SQLAlchemy will resolve relative to the Flask application's instance folder 
+    # (app.instance_path, typically 'backend/instance/' if app created with instance_relative_config=True).
     SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///clinic.db')
+    if not os.environ.get('DATABASE_URL'): # Log if default is being used
+        print(f"INFO: Config: DATABASE_URL not set, defaulting SQLALCHEMY_DATABASE_URI to: {SQLALCHEMY_DATABASE_URI} (will be relative to instance folder)")
 
 class DevelopmentConfig(Config):
     DEBUG = True
     FLASK_ENV = 'development'
-    # SQLALCHEMY_DATABASE_URI is inherited. If DATABASE_URL is not set, it defaults to 'sqlite:///clinic.db'.
-    # For a different development database, set DATABASE_URL or override here:
-    # SQLALCHEMY_DATABASE_URI = os.environ.get('DEV_DATABASE_URL', 'sqlite:///dev_clinic.db')
+    # SQLALCHEMY_DATABASE_URI is inherited from Config.
+    # If DATABASE_URL was set in .env, DevelopmentConfig will use it.
+    # Otherwise, it uses the 'sqlite:///clinic.db' default from Config, relative to instance folder.
 
 class TestingConfig(Config):
     TESTING = True
@@ -49,9 +56,11 @@ class ProductionConfig(Config):
     DEBUG = False
     FLASK_ENV = 'production'
     # SQLALCHEMY_DATABASE_URI is inherited from Config.
-    # It will be 'sqlite:///clinic.db' if DATABASE_URL is not set in the environment.
+    # It will be 'sqlite:///clinic.db' (relative to instance folder) if DATABASE_URL is not set in the environment.
 
     # Critical security checks for production:
+    # These checks are performed when this class is defined (at module import time).
+    # They verify if the *currently effective* SECRET_KEY and JWT_SECRET_KEY (from env var or default) are the weak defaults.
     if Config.SECRET_KEY == 'a_very_secret_key_that_should_be_changed':
         print("CRITICAL: Production SECRET_KEY is not set or is using the weak default. Ensure it's set via env var.", flush=True)
         raise ValueError("CRITICAL SECURITY RISK: Production SECRET_KEY is not set or is using the weak default. Set a strong, random SECRET_KEY environment variable.")
@@ -72,11 +81,11 @@ class ProductionConfig(Config):
         )
         CORS_ORIGINS = []  # Default to empty list, effectively disallowing all CORS requests
     else:
-        CORS_ORIGINS = _prod_cors_origins_env
+        CORS_ORIGINS = _prod_cors_origins_env # String value, parsed in app/__init__.py by CORS extension
 
-    # Check if using default SQLite in production when DATABASE_URL is not explicitly set
-    if not os.environ.get('DATABASE_URL'): # If DATABASE_URL is not set, it's using 'sqlite:///clinic.db' from Config default
-        print("WARNING: Production environment is using the default instance-relative SQLite database 'clinic.db' "
+    # Check if using default SQLite in production when DATABASE_URL is not explicitly set.
+    if not os.environ.get('DATABASE_URL'): # If DATABASE_URL is not set, Config.SQLALCHEMY_DATABASE_URI defaults to 'sqlite:///clinic.db'
+        print("WARNING: Production environment is using the default instance-relative SQLite database ('clinic.db') "
               "because DATABASE_URL is not set. Ensure DATABASE_URL environment variable is set for a production-grade database service (e.g., PostgreSQL, MySQL).", flush=True)
 
 config_by_name = {
