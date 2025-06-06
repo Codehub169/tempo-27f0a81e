@@ -42,7 +42,7 @@ FLASK_APP=run.py
 FLASK_ENV=development
 SECRET_KEY='your_super_secret_key_for_flask_sessions_and_csrf'
 JWT_SECRET_KEY='your_super_secret_key_for_jwt_signing'
-DATABASE_URL='sqlite:///instance/clinic.db'
+DATABASE_URL='sqlite:///clinic.db'
 CORS_ORIGINS='*'
 EOF
 fi
