@@ -15,8 +15,8 @@ if [ -f "yarn.lock" ]; then
   echo "Building frontend application with Yarn..."
   yarn build
 elif [ -f "package-lock.json" ]; then
-  echo "package-lock.json found. Installing dependencies with npm ci..."
-  npm ci
+  echo "package-lock.json found. Installing dependencies with npm install (was npm ci due to lockfile issues)..."
+  npm install
   echo "Building frontend application with npm..."
   npm run build
 else
@@ -43,7 +43,7 @@ fi
 # Use python3 from PATH to create venv, then use venv's executables
 if [ ! -d "$VENV_DIR" ]; then
   echo "Creating virtual environment in $VENV_DIR..."
-  python3 -m venv $VENV_DIR
+  python3 -m venv "$VENV_DIR"
 fi
 
 # Define paths to executables within the virtual environment
@@ -56,9 +56,9 @@ FLASK_EXEC="$VENV_DIR/bin/flask"
 # source "$VENV_DIR/bin/activate"
 
 echo "Installing/updating backend dependencies..."
-$PIP_EXEC install --upgrade pip
+"$PIP_EXEC" install --upgrade pip
 if [ -f "requirements.txt" ]; then
-  $PIP_EXEC install -r requirements.txt
+  "$PIP_EXEC" install -r requirements.txt
 else
   echo "Warning: requirements.txt not found. Skipping pip install -r."
 fi
@@ -74,22 +74,22 @@ fi
 
 if [ ! -d "migrations" ]; then
     echo "Migrations directory not found. Initializing..."
-    $FLASK_EXEC db init
+    "$FLASK_EXEC" db init
     echo "Creating initial migration script..."
-    $FLASK_EXEC db migrate -m "Initial migration"
+    "$FLASK_EXEC" db migrate -m "Initial migration"
     echo "Applying migrations (creating database tables)..."
-    $FLASK_EXEC db upgrade
+    "$FLASK_EXEC" db upgrade
 elif [ ! -f "instance/clinic.db" ]; then
     # Migrations folder exists, but DB file doesn't.
     echo "Database file instance/clinic.db not found, but migrations folder exists. Applying all migrations..."
-    $FLASK_EXEC db upgrade
+    "$FLASK_EXEC" db upgrade
 else
     # Both migrations folder and DB file exist.
     echo "Database and migrations folder exist. Checking for model changes and applying any pending migrations..."
     # flask db migrate will create a new revision if models changed since last revision.
     # If no changes, it will report "No changes detected". This is safe.
-    $FLASK_EXEC db migrate -m "Automated startup migration check"
-    $FLASK_EXEC db upgrade # Applies any pending revisions (newly created or existing unapplied)
+    "$FLASK_EXEC" db migrate -m "Automated startup migration check"
+    "$FLASK_EXEC" db upgrade # Applies any pending revisions (newly created or existing unapplied)
 fi
 
 # Start the backend server
@@ -97,6 +97,6 @@ fi
 echo "Starting backend server..."
 # FLASK_RUN_PORT is used by run.py. Setting it here ensures it uses 9000 if not overridden elsewhere.
 export FLASK_RUN_PORT=9000
-$PYTHON_EXEC run.py
+"$PYTHON_EXEC" run.py
 
 # cd .. # Go back to project root if script were to continue; not needed as run.py is the last command.
