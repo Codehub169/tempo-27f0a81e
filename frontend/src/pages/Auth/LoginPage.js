@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Link as RouterLink } from 'react-router-dom';
 import {
-  Box, Button, FormControl, FormLabel, Input, VStack, Heading, Text, useToast, Flex, Icon
+  Box, Button, FormControl, FormLabel, Input, VStack, Heading, Text, useToast, Flex, Icon, Link
 } from '@chakra-ui/react';
 import { FiEye } from 'react-icons/fi'; // Using FiEye as a placeholder for the logo
 import { useAuth } from '../../contexts/AuthContext';
@@ -44,12 +44,13 @@ const LoginPage = () => {
         boxShadow="xl" 
         bg="white"
         textAlign="center"
+        w="full"
       >
         <VStack spacing={6} align="stretch">
           <Box textAlign="center">
             <Icon as={FiEye} w={12} h={12} color="brand.500" mx="auto" />
             <Heading as="h1" size="xl" mt={2} color="brand.600" fontFamily="heading">
-              EyeClinic
+              EyeClinic Login
             </Heading>
             <Text fontSize="md" color="gray.600">
               Welcome back! Please login to your account.
@@ -66,6 +67,7 @@ const LoginPage = () => {
                   onChange={(e) => setEmail(e.target.value)} 
                   placeholder="you@example.com"
                   focusBorderColor="brand.400"
+                  autoComplete="email"
                 />
               </FormControl>
 
@@ -75,8 +77,11 @@ const LoginPage = () => {
                   type="password" 
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)} 
-                  placeholder="••••••••"
+                  placeholder="
+privacy_text
+"
                   focusBorderColor="brand.400"
+                  autoComplete="current-password"
                 />
               </FormControl>
 
@@ -93,7 +98,10 @@ const LoginPage = () => {
           </form>
 
           <Text fontSize="sm" color="gray.500" mt={2}>
-            Forgot Password? <Text as="a" href="#" color="brand.500" _hover={{ textDecoration: 'underline' }}>Click here</Text>
+            Forgot Password? <Link href="#" color="brand.500" _hover={{ textDecoration: 'underline' }}>Click here</Link>
+          </Text>
+          <Text fontSize="sm" color="gray.500" mt={2}>
+            Don't have an account? <Link as={RouterLink} to="/register" color="brand.500" fontWeight="medium" _hover={{ textDecoration: 'underline' }}>Sign Up</Link>
           </Text>
         </VStack>
       </Box>

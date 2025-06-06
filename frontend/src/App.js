@@ -3,9 +3,9 @@ import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { ChakraProvider, Box } from '@chakra-ui/react';
 import theme from './theme';
 import MainLayout from './components/Layout/MainLayout';
-// Import the main AuthProvider and useAuth hook
 import { AuthProvider as MainAuthProvider, useAuth as useMainAuth } from './contexts/AuthContext';
-import LoginPage from './pages/Auth/LoginPage'; // Import the actual LoginPage
+import LoginPage from './pages/Auth/LoginPage';
+import RegisterPage from './pages/Auth/RegisterPage'; // Import the RegisterPage
 
 // Placeholder Pages (to be implemented in later batches)
 const DashboardPage = () => <Box p={4}>Dashboard Page - Placeholder</Box>;
@@ -22,8 +22,7 @@ const PrivateRoute = () => {
   const location = useLocation();
 
   if (loading) {
-    // Optional: Show a loading spinner or a blank page while auth state is being determined
-    return <Box p={4}>Loading authentication...</Box>; 
+    return <Box p={4} textAlign="center" mt="20vh">Loading authentication...</Box>; 
   }
 
   if (!isAuthenticated) {
@@ -37,7 +36,7 @@ const FallbackRedirect = () => {
   const { isAuthenticated, loading } = useMainAuth();
 
   if (loading) {
-    return <Box p={4}>Loading...</Box>; 
+    return <Box p={4} textAlign="center" mt="20vh">Loading...</Box>; 
   }
 
   return <Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />;
@@ -49,6 +48,7 @@ function App() {
       <MainAuthProvider> 
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} /> {/* Add register route here */}
           <Route element={<PrivateRoute />}>
             <Route element={<MainLayout />}>
               <Route path="/dashboard" element={<DashboardPage />} />
