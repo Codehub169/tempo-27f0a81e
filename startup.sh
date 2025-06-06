@@ -83,14 +83,30 @@ fi
 echo "Applying database migrations..."
 # This logic runs inside the 'backend' directory
 
-# Ensure instance directory exists for SQLite, as Flask-Migrate/SQLAlchemy might need it
-# The instance folder is typically at the same level as the 'app' package, inside 'backend'
-# Python code in config.py and app/__init__.py also handles instance folder creation,
-# but this ensures it exists before flask db commands are run.
+# Ensure instance directory exists for SQLite and is writable
 if [ ! -d "instance" ]; then
-    echo "Creating instance directory for database..."
+    echo "INFO: Instance directory 'instance' not found. Creating it (./instance relative to backend dir)..."
     mkdir -p instance
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to create instance directory 'instance'. Exiting."
+        exit 1
+    fi
+    echo "INFO: Instance directory 'instance' created."
+else
+    echo "INFO: Instance directory 'instance' already exists."
 fi
+
+# Check writability of the instance directory by attempting to create a temporary file
+if touch "./instance/.check_writable" && rm "./instance/.check_writable"; then
+    echo "INFO: Instance directory './instance' is writable by current user (uid: $(id -u))."
+else
+    echo "ERROR: Instance directory './instance' is NOT writable by current user (uid: $(id -u))."
+    echo "This is likely the cause of the SQLite 'unable to open database file' error."
+    echo "Please check Docker volume mounts, file permissions, or the user running this script."
+    echo "Current permissions for './instance': $(ls -ld ./instance)"
+    exit 1
+fi
+
 
 # Check and manage database migrations
 # FLASK_APP environment variable (e.g., FLASK_APP=run.py from .env) is used by 'flask db' commands.

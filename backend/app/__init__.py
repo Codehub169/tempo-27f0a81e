@@ -14,11 +14,6 @@ jwt = JWTManager()
 
 def create_app(config_name='development'):
     """Application factory function."""
-    # Correct path for frontend build directory, assuming 'backend' and 'frontend' are siblings
-    # __file__ is backend/app/__init__.py
-    # os.path.dirname(__file__) is backend/app
-    # '..' -> backend
-    # '..' -> project_root
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
     frontend_build_path = os.path.join(project_root, 'frontend', 'build')
     
@@ -27,46 +22,51 @@ def create_app(config_name='development'):
                 static_folder=os.path.join(frontend_build_path, 'static'))
 
     # Load configuration from config.py based on config_name
-    app.config.from_object(config_by_name.get(config_name, config_by_name['default']))
+    # Fallback to 'default' config (DevelopmentConfig) if config_name is invalid
+    actual_config = config_by_name.get(config_name, config_by_name['default'])
+    app.config.from_object(actual_config)
 
     try:
         # Ensure instance folder exists (for SQLite DB, logs, etc.)
+        # app.instance_path is determined by Flask based on instance_relative_config=True
+        # and the application root path.
         os.makedirs(app.instance_path, exist_ok=True)
     except OSError as e:
-        # Log this instead of just passing if it's a real issue
-        app.logger.error(f"Error creating instance path {app.instance_path}: {e}")
-        pass 
+        app.logger.error(f"CRITICAL OS ERROR creating instance path {app.instance_path}: {e}. SQLite database operations will likely fail.")
+        raise OSError(f"Failed to create critical instance path {app.instance_path}: {e}") from e
         
     db.init_app(app)
     migrate.init_app(app, db)
     
     # Configure CORS
-    allowed_origins_str = app.config.get('CORS_ORIGINS')
+    # The CORS_ORIGINS value is validated in ProductionConfig for security.
+    allowed_origins_config = app.config.get('CORS_ORIGINS') # This will be a string or list from config
     final_origins_setting = [] 
 
-    if isinstance(allowed_origins_str, str):
-        if allowed_origins_str == '*':
+    if isinstance(allowed_origins_config, str):
+        if allowed_origins_config == '*':
+            # In production, ProductionConfig should prevent '*' unless explicitly intended and configured.
+            # For development, '*' is common.
             final_origins_setting = '*' 
         else:
-            origins_list = [origin.strip() for origin in allowed_origins_str.split(',') if origin.strip()]
+            # Parse comma-separated string into a list
+            origins_list = [origin.strip() for origin in allowed_origins_config.split(',') if origin.strip()]
             if origins_list:
                 final_origins_setting = origins_list
-    elif isinstance(allowed_origins_str, list):
-        final_origins_setting = allowed_origins_str
+    elif isinstance(allowed_origins_config, list):
+        # If config already provides a list (less common for env var based config but possible)
+        final_origins_setting = allowed_origins_config
     
-    # If CORS_ORIGINS is not set and in debug mode, default to '*' for convenience.
-    # Otherwise, if not set, it defaults to an empty list (no CORS access unless specified).
+    # This fallback to '*' for debug mode if final_origins_setting is empty 
+    # is generally safe IF ProductionConfig ensures CORS_ORIGINS is always set appropriately.
+    # If CORS_ORIGINS was an empty string/list from config (and not debug mode), final_origins_setting remains [], restricting CORS.
     if not final_origins_setting and app.debug:
         final_origins_setting = '*'
     
-    # Flask-CORS handles the case where origins='*' and supports_credentials=True
-    # by reflecting the request's Origin header.
     CORS(app, resources={r"/api/*": {"origins": final_origins_setting}}, supports_credentials=True)
     
     jwt.init_app(app)
 
-    # Import BLOCKLIST here after jwt is initialized and other core app setup is done.
-    # This helps avoid circular dependencies if auth_routes needs app context or other extensions.
     from .routes.auth_routes import BLOCKLIST 
 
     @jwt.token_in_blocklist_loader
@@ -101,14 +101,15 @@ def create_app(config_name='development'):
         return jsonify({"status": "healthy", "message": "Eye Clinic API is running!"}), 200
 
     # Serve React App (SPA)
-    # This should be registered after all API blueprints to act as a catch-all for frontend routes.
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def serve_react_app(path):
         # Check if path is for a file in the static assets directory (e.g., /static/js/main.chunk.js)
+        # app.static_folder is frontend/build/static
         if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
             return send_from_directory(app.static_folder, path)
         # Check if path is for a file in the build root (e.g., /manifest.json, /favicon.ico)
+        # frontend_build_path is frontend/build
         elif path != "" and os.path.exists(os.path.join(frontend_build_path, path)):
             return send_from_directory(frontend_build_path, path)
         # Otherwise, serve the main index.html for SPA routing
@@ -117,7 +118,7 @@ def create_app(config_name='development'):
             if os.path.exists(index_html_path):
                 return send_from_directory(frontend_build_path, 'index.html')
             else:
-                # Fallback if index.html is somehow missing
-                return jsonify({"error": "Frontend not found. Build the frontend application."}), 404
+                app.logger.error(f"Frontend index.html not found at {index_html_path}")
+                return jsonify({"error": "Frontend not found. Ensure the frontend application is built correctly."}), 404
 
     return app
