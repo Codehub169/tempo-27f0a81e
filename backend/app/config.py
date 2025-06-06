@@ -1,38 +1,8 @@
 import os
 from datetime import timedelta
 
-# print("DEBUG: Loading config.py") # Optional: for very basic module load tracing
-
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-# INSTANCE_FOLDER_PATH is the absolute path to the 'backend/instance' directory
 INSTANCE_FOLDER_PATH = os.path.join(BASE_DIR, '..', 'instance')
-
-# Helper function to determine the database URI
-def _calculate_database_uri(env_var_key, default_db_filename, instance_path, is_testing_config=False):
-    """Calculates the SQLAlchemy database URI based on environment variables and defaults."""
-    env_uri = os.environ.get(env_var_key)
-    if env_uri:
-        if is_testing_config and env_uri == 'sqlite:///:memory:':
-            # Use in-memory SQLite database for testing if specified
-            return env_uri
-        
-        # Check for relative SQLite paths (e.g., sqlite:///mydb.db)
-        # These need to be resolved relative to the instance folder.
-        if env_uri.startswith('sqlite:///') and not env_uri.startswith('sqlite:////'):
-            db_name = env_uri[len('sqlite:///'):]
-            if not db_name: # Handle 'sqlite:///' case (empty database name)
-                 print(f"ERROR: Invalid relative SQLite URI: {env_uri}. Database name cannot be empty.")
-                 raise ValueError(f"Invalid relative SQLite URI: {env_uri}. Database name cannot be empty.")
-            abs_db_path = os.path.join(instance_path, db_name)
-            return f'sqlite:///{abs_db_path}' # Forms sqlite:////<absolute_path_to_db>
-        
-        # Handles absolute SQLite paths (e.g., sqlite:////path/to/db) 
-        # or other database types (e.g., postgresql://user:pass@host/db)
-        return env_uri
-    
-    # Default to a SQLite file in the instance folder if the environment variable is not set
-    abs_db_path = os.path.join(instance_path, default_db_filename)
-    return f'sqlite:///{abs_db_path}'
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'a_very_secret_key_that_should_be_changed'
@@ -50,42 +20,36 @@ class Config:
         except OSError as e:
             print(f"CRITICAL: Config: Could not create instance folder at {INSTANCE_FOLDER_PATH}: {e}. SQLite database operations will likely fail.")
             raise OSError(f"Failed to create critical instance folder {INSTANCE_FOLDER_PATH}: {e}") from e
-    # else:
-        # print(f"INFO: Config: Instance folder at {INSTANCE_FOLDER_PATH} already exists.") # Optional: for verbosity
 
-    SQLALCHEMY_DATABASE_URI = _calculate_database_uri(
-        'DATABASE_URL', 
-        'clinic.db', 
-        INSTANCE_FOLDER_PATH
-    )
-    # print(f"DEBUG: Config.SQLALCHEMY_DATABASE_URI set to: {SQLALCHEMY_DATABASE_URI}")
+    # Simplified URI determination
+    # If DATABASE_URL is provided, use it. Otherwise, use a relative SQLite path
+    # which Flask-SQLAlchemy will resolve relative to the instance folder.
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL', 'sqlite:///clinic.db')
 
 class DevelopmentConfig(Config):
     DEBUG = True
-    FLASK_ENV = 'development' # FLASK_ENV is a convention; DEBUG is what Flask uses internally.
-    # print(f"DEBUG: DevelopmentConfig: SQLALCHEMY_DATABASE_URI is {Config.SQLALCHEMY_DATABASE_URI}")
-    # SQLALCHEMY_ECHO = True # Uncomment for debugging SQL queries
+    FLASK_ENV = 'development'
+    # SQLALCHEMY_DATABASE_URI is inherited. If DATABASE_URL is not set, it defaults to 'sqlite:///clinic.db'.
+    # For a different development database, set DATABASE_URL or override here:
+    # SQLALCHEMY_DATABASE_URI = os.environ.get('DEV_DATABASE_URL', 'sqlite:///dev_clinic.db')
 
 class TestingConfig(Config):
     TESTING = True
     FLASK_ENV = 'testing'
     
-    SQLALCHEMY_DATABASE_URI = _calculate_database_uri(
-        'TEST_DATABASE_URL', 
-        'test_clinic.db', # Default test DB filename if TEST_DATABASE_URL not set
-        INSTANCE_FOLDER_PATH, 
-        is_testing_config=True
-    )
-    # print(f"DEBUG: TestingConfig.SQLALCHEMY_DATABASE_URI set to: {SQLALCHEMY_DATABASE_URI}")
+    # For testing, often :memory: or a specific test DB file is used.
+    # If TEST_DATABASE_URL is 'sqlite:///test_file.db', it becomes instance relative.
+    # If TEST_DATABASE_URL is 'sqlite:///:memory:', it's used as is.
+    SQLALCHEMY_DATABASE_URI = os.environ.get('TEST_DATABASE_URL', 'sqlite:///test_clinic.db')
 
     JWT_SECRET_KEY = 'test_jwt_secret_key_for_testing_do_not_use_in_prod'
     SECRET_KEY = 'test_secret_key_for_testing_do_not_use_in_prod'
-    # WTF_CSRF_ENABLED = False # Disable CSRF protection in forms for testing, if applicable
 
 class ProductionConfig(Config):
     DEBUG = False
     FLASK_ENV = 'production'
-    # print(f"DEBUG: ProductionConfig: SQLALCHEMY_DATABASE_URI is {Config.SQLALCHEMY_DATABASE_URI}")
+    # SQLALCHEMY_DATABASE_URI is inherited from Config.
+    # It will be 'sqlite:///clinic.db' if DATABASE_URL is not set in the environment.
 
     # Critical security checks for production:
     if Config.SECRET_KEY == 'a_very_secret_key_that_should_be_changed':
@@ -108,16 +72,12 @@ class ProductionConfig(Config):
         )
         CORS_ORIGINS = []  # Default to empty list, effectively disallowing all CORS requests
     else:
-        CORS_ORIGINS = _prod_cors_origins_env # Expected to be a comma-separated string or a valid single origin
-    # print(f"DEBUG: ProductionConfig.CORS_ORIGINS set to: {CORS_ORIGINS}")
+        CORS_ORIGINS = _prod_cors_origins_env
 
     # Check if using default SQLite in production when DATABASE_URL is not explicitly set
-    default_sqlite_uri_in_prod = f'sqlite:///{os.path.join(INSTANCE_FOLDER_PATH, "clinic.db")}'
-    if Config.SQLALCHEMY_DATABASE_URI == default_sqlite_uri_in_prod and not os.environ.get('DATABASE_URL'):
-        print("WARNING: Production environment is using the default SQLite database 'clinic.db' because DATABASE_URL is not set. "
-              "Ensure DATABASE_URL environment variable is set to a robust, production-grade database service (e.g., PostgreSQL, MySQL).", flush=True)
-        # Consider raising ValueError for stricter policy:
-        # raise ValueError("Production environment must use a configured DATABASE_URL for a production-grade database.")
+    if not os.environ.get('DATABASE_URL'): # If DATABASE_URL is not set, it's using 'sqlite:///clinic.db' from Config default
+        print("WARNING: Production environment is using the default instance-relative SQLite database 'clinic.db' "
+              "because DATABASE_URL is not set. Ensure DATABASE_URL environment variable is set for a production-grade database service (e.g., PostgreSQL, MySQL).", flush=True)
 
 config_by_name = {
     'development': DevelopmentConfig,
@@ -125,5 +85,3 @@ config_by_name = {
     'production': ProductionConfig,
     'default': DevelopmentConfig # Default to Development if FLASK_ENV is not set or invalid
 }
-
-# print(f"DEBUG: config.py loaded. Available configurations: {list(config_by_name.keys())}")
